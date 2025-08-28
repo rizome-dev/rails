@@ -1,17 +1,3 @@
-"""
-Enhanced Rails Example - Composable Lifecycle and Tool Interaction
-
-This example demonstrates the advanced Rails capabilities inspired by the reference
-implementation, including:
-- Tool functions that manipulate Rails instance via current_rails()
-- Lifecycle functions for modular setup/cleanup
-- .then() method for workflow execution
-- Background execution with proper error handling
-- Composable workflow patterns
-
-Based on the reference implementation patterns for production-grade simplicity.
-"""
-
 import asyncio
 import json
 import time
@@ -22,10 +8,6 @@ from rails import (
     execute_background_workflow, WorkflowOrchestrator
 )
 
-
-# ============================================================================
-# TOOLS THAT INTERACT WITH RAILS INSTANCE
-# ============================================================================
 
 def api_client_tool(endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -215,10 +197,6 @@ async def monitoring_lifecycle(rails):
     print("📊 Monitoring system deactivated")
 
 
-# ============================================================================
-# WORKFLOW FUNCTIONS FOR .then() EXECUTION
-# ============================================================================
-
 async def error_recovery_workflow(rails):
     """Workflow that handles error recovery when triggered by conditions."""
     print("🔄 Error recovery workflow triggered")
@@ -276,10 +254,6 @@ async def performance_optimization_workflow(rails):
     
     return {"original_score": current_score, "optimized_score": optimized_score}
 
-
-# ============================================================================
-# MAIN DEMONSTRATION
-# ============================================================================
 
 async def demonstrate_enhanced_rails():
     """
