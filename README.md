@@ -354,10 +354,10 @@ messages = [HumanMessage(content="Help me debug this code")]
 result = await adapter.run(messages)
 ```
 
-#### SmolaAgents Integration
+#### SmolAgents Integration
 
 ```python
-from rails.adapters import SmolaAgentsAdapter
+from rails.adapters import SmolAgentsAdapter
 from smolagents import Agent
 
 # Set up Rails with agent-specific conditions
@@ -367,9 +367,9 @@ rails.when(lambda s: s.get_counter_sync('tool_calls') >= 5).inject({
     "content": "I notice I'm using many tools. Let me focus on the core task."
 })
 
-# Create SmolaAgents adapter  
+# Create SmolAgents adapter  
 agent = Agent(model="gpt-4", tools=[web_search, calculator])
-adapter = SmolaAgentsAdapter(rails, agent)
+adapter = SmolAgentsAdapter(rails, agent)
 
 result = await adapter.run("Research the latest AI developments and calculate ROI")
 ```

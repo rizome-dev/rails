@@ -1,7 +1,7 @@
 """Rails framework adapters for seamless integration with popular agent frameworks.
 
 This package provides adapters that allow Rails conditional message injection
-to work seamlessly with various agent frameworks like LangChain, SmolaAgents,
+to work seamlessly with various agent frameworks like LangChain, SmolAgents,
 and more. Each adapter maintains the framework-agnostic nature of Rails while
 providing framework-specific optimizations.
 
@@ -25,9 +25,9 @@ LangChain Integration:
         {"role": "user", "content": "Hello!"}
     ])
 
-SmolaAgents Integration:
+SmolAgents Integration:
     from rails import Rails
-    from rails.adapters import SmolaAgentsAdapter
+    from rails.adapters import SmolAgentsAdapter
     from smolagents import CodeAgent
     
     rails = Rails()
@@ -37,7 +37,7 @@ SmolaAgents Integration:
     })
     
     agent = CodeAgent(tools=[], model="gpt-4")
-    adapter = SmolaAgentsAdapter(rails, agent)
+    adapter = SmolAgentsAdapter(rails, agent)
     
     result = await adapter.run("Create a data visualization")
 
@@ -64,7 +64,7 @@ except ImportError:
     LANGCHAIN_AVAILABLE = False
 
 try:
-    from .smolagents import SmolaAgentsAdapter, CodeAgentAdapter, create_smolagents_adapter
+    from .smolagents import SmolAgentsAdapter, CodeAgentAdapter, create_smolagents_adapter
     from .smolagents import with_rails as smolagents_with_rails
     SMOLAGENTS_AVAILABLE = True
 except ImportError:
@@ -89,7 +89,7 @@ if LANGCHAIN_AVAILABLE:
 
 if SMOLAGENTS_AVAILABLE:
     __all__.extend([
-        "SmolaAgentsAdapter",
+        "SmolAgentsAdapter",
         "CodeAgentAdapter", 
         "create_smolagents_adapter",
         "smolagents_with_rails",
@@ -137,14 +137,14 @@ def get_available_adapters() -> dict:
     if SMOLAGENTS_AVAILABLE:
         adapters['smolagents'] = {
             'available': True,
-            'adapter': SmolaAgentsAdapter,
-            'description': 'Adapter for SmolaAgents agents'
+            'adapter': SmolAgentsAdapter,
+            'description': 'Adapter for SmolAgents agents'
         }
     else:
         adapters['smolagents'] = {
             'available': False,
             'adapter': None,
-            'description': 'SmolaAgents adapter (requires: pip install smolagents)',
+            'description': 'SmolAgents adapter (requires: pip install smolagents)',
             'install_hint': 'pip install smolagents'
         }
     
@@ -199,7 +199,7 @@ def auto_adapter(framework_object, rails=None):
     if LANGCHAIN_AVAILABLE and 'langchain' in obj_type.lower():
         return LangChainAdapter(rails, framework_object)
     
-    # SmolaAgents detection
+    # SmolAgents detection
     if SMOLAGENTS_AVAILABLE and ('smolagents' in obj_type.lower() or 'agent' in obj_type.lower()):
         return create_smolagents_adapter(framework_object, rails)
     

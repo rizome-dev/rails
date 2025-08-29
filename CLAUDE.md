@@ -107,7 +107,7 @@ pdm run check         # Verify built packages with twine
 **Adapters (`src/rails/adapters/`)**
 - `BaseRailsAdapter`: Abstract base for framework integration
 - `LangChainAdapter`: Integration with LangChain
-- `SmolaAgentsAdapter`: Integration with SmolaAgents
+- `SmolAgentsAdapter`: Integration with SmolAgents
 - Generic `create_adapter()` for any processing function
 
 #### Key Design Patterns

@@ -568,24 +568,24 @@ async def demonstrate_framework_adapters():
     except ImportError:
         print(f"\n🦜 LangChain Adapter: Not available (graceful degradation)")
     
-    # 3. Mock SmolaAgents Adapter
+    # 3. Mock SmolAgents Adapter
     try:
-        from rails.adapters import SmolaAgentsAdapter
+        from rails.adapters import SmolAgentsAdapter
         
-        class MockSmolaAgent:
+        class MockSmolAgent:
             async def run(self, task, **kwargs):
-                return f"SmolaAgent completed task: {task}"
+                return f"SmolAgent completed task: {task}"
         
-        mock_agent = MockSmolaAgent()
-        smola_adapter = SmolaAgentsAdapter(rails, mock_agent)
+        mock_agent = MockSmolAgent()
+        smola_adapter = SmolAgentsAdapter(rails, mock_agent)
         
-        print(f"\n🤖 SmolaAgents Adapter Test:")
+        print(f"\n🤖 SmolAgents Adapter Test:")
         async with smola_adapter as adapter:
             result = await adapter.run("Process these messages")
-            print(f"  SmolaAgents integration successful")
+            print(f"  SmolAgents integration successful")
     
     except ImportError:
-        print(f"\n🤖 SmolaAgents Adapter: Not available (graceful degradation)")
+        print(f"\n🤖 SmolAgents Adapter: Not available (graceful degradation)")
     
     print(f"\n✅ Framework adapters demonstrate Rails' framework-agnostic design")
 

@@ -1,7 +1,7 @@
-"""SmolaAgents adapter for Rails integration.
+"""SmolAgents adapter for Rails integration.
 
-This module provides seamless integration between Rails and SmolaAgents,
-allowing Rails conditional message injection to work with SmolaAgents agents and tools.
+This module provides seamless integration between Rails and SmolAgents,
+allowing Rails conditional message injection to work with SmolAgents agents and tools.
 """
 
 from typing import List, Dict, Any, Optional, Union
@@ -11,7 +11,7 @@ try:
     from smolagents import CodeAgent, ToolCallingAgent
     SMOLAGENTS_AVAILABLE = True
 except ImportError:
-    # Graceful degradation when SmolaAgents is not installed
+    # Graceful degradation when SmolAgents is not installed
     CodeAgent = Any
     ToolCallingAgent = Any
     SMOLAGENTS_AVAILABLE = False
@@ -21,15 +21,15 @@ from ..core import Rails
 from ..types import Message
 
 
-class SmolaAgentsAdapter(BaseRailsAdapter):
-    """Rails adapter for SmolaAgents integration.
+class SmolAgentsAdapter(BaseRailsAdapter):
+    """Rails adapter for SmolAgents integration.
     
-    This adapter allows you to wrap SmolaAgents agents with Rails conditional
+    This adapter allows you to wrap SmolAgents agents with Rails conditional
     message injection capabilities, enabling sophisticated conversation flow control.
     
     Usage:
         from smolagents import CodeAgent
-        from rails.adapters import SmolaAgentsAdapter
+        from rails.adapters import SmolAgentsAdapter
         
         # Set up Rails rules
         rails = Rails()
@@ -38,36 +38,36 @@ class SmolaAgentsAdapter(BaseRailsAdapter):
             "content": "You've used several tools. Consider if you have enough information to answer."
         })
         
-        # Create SmolaAgents agent
+        # Create SmolAgents agent
         agent = CodeAgent(tools=[], model="gpt-4")
         
         # Wrap with Rails
-        adapter = SmolaAgentsAdapter(rails, agent)
+        adapter = SmolAgentsAdapter(rails, agent)
         
         # Use with Rails injection
         result = await adapter.run("Analyze this data and create a visualization")
     """
     
     def __init__(self, rails: Optional[Rails] = None, agent: Optional[Any] = None):
-        """Initialize the SmolaAgents adapter.
+        """Initialize the SmolAgents adapter.
         
         Args:
             rails: Rails instance for message injection
-            agent: SmolaAgents agent instance
+            agent: SmolAgents agent instance
         """
         super().__init__(rails)
         self.agent = agent
         
         if not SMOLAGENTS_AVAILABLE:
             raise ImportError(
-                "SmolaAgents is not installed. Install it with: pip install smolagents"
+                "SmolAgents is not installed. Install it with: pip install smolagents"
             )
     
     async def process_messages(self, messages: List[Message], 
                              agent: Optional[Any] = None,
                              task: Optional[str] = None,
                              **kwargs) -> Any:
-        """Process messages through SmolaAgents agent.
+        """Process messages through SmolAgents agent.
         
         Args:
             messages: Rails-processed messages
@@ -76,14 +76,14 @@ class SmolaAgentsAdapter(BaseRailsAdapter):
             **kwargs: Additional arguments for the agent
             
         Returns:
-            SmolaAgents agent result
+            SmolAgents agent result
         """
         target_agent = agent or self.agent
         
         if target_agent is None:
             raise ValueError("No agent provided. Pass one to __init__ or process_messages")
         
-        # Handle single task execution (most common SmolaAgents pattern)
+        # Handle single task execution (most common SmolAgents pattern)
         if task:
             # Inject Rails messages as system context
             system_messages = [msg for msg in messages if msg.get("role") == "system"]
@@ -100,7 +100,7 @@ class SmolaAgentsAdapter(BaseRailsAdapter):
         
         # Handle conversation-style interaction
         else:
-            # Convert Rails messages to SmolaAgents format
+            # Convert Rails messages to SmolAgents format
             conversation = self._build_conversation(messages)
             
             # For conversation, we typically run the last user message
@@ -122,42 +122,42 @@ class SmolaAgentsAdapter(BaseRailsAdapter):
                 raise ValueError("No user message found in conversation")
     
     def _build_conversation(self, messages: List[Message]) -> List[Dict[str, str]]:
-        """Build SmolaAgents conversation format from Rails messages.
+        """Build SmolAgents conversation format from Rails messages.
         
         Args:
             messages: Rails messages
             
         Returns:
-            SmolaAgents conversation format
+            SmolAgents conversation format
         """
         conversation = []
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
             
-            # Map Rails roles to SmolaAgents format
+            # Map Rails roles to SmolAgents format
             if role in ["user", "human"]:
                 conversation.append({"role": "user", "content": content})
             elif role in ["assistant", "ai"]:
                 conversation.append({"role": "assistant", "content": content})
             elif role == "system":
-                # System messages are handled separately in SmolaAgents
+                # System messages are handled separately in SmolAgents
                 conversation.append({"role": "system", "content": content})
         
         return conversation
     
     async def update_rails_state(self, original_messages: List[Message], 
                                modified_messages: List[Message], result: Any) -> None:
-        """Update Rails state after SmolaAgents processing.
+        """Update Rails state after SmolAgents processing.
         
         Args:
             original_messages: Original input messages
             modified_messages: Messages after Rails injection
-            result: SmolaAgents processing result
+            result: SmolAgents processing result
         """
         await super().update_rails_state(original_messages, modified_messages, result)
         
-        # Track SmolaAgents-specific metrics
+        # Track SmolAgents-specific metrics
         # Check if tools were used (basic heuristic)
         if hasattr(result, 'tool_calls') or "```" in str(result):
             await self.rails.store.increment("tool_calls")
@@ -167,8 +167,8 @@ class SmolaAgentsAdapter(BaseRailsAdapter):
             await self.rails.store.increment("code_generations")
 
 
-class CodeAgentAdapter(SmolaAgentsAdapter):
-    """Specialized Rails adapter for SmolaAgents CodeAgent.
+class CodeAgentAdapter(SmolAgentsAdapter):
+    """Specialized Rails adapter for SmolAgents CodeAgent.
     
     This adapter provides additional functionality specific to CodeAgent,
     including tracking code execution and managing coding context.
@@ -216,15 +216,15 @@ class CodeAgentAdapter(SmolaAgentsAdapter):
 
 
 def create_smolagents_adapter(agent: Any, 
-                            rails: Optional[Rails] = None) -> SmolaAgentsAdapter:
-    """Factory function to create a SmolaAgents Rails adapter.
+                            rails: Optional[Rails] = None) -> SmolAgentsAdapter:
+    """Factory function to create a SmolAgents Rails adapter.
     
     Args:
-        agent: SmolaAgents agent to wrap
+        agent: SmolAgents agent to wrap
         rails: Optional Rails instance
         
     Returns:
-        Configured SmolaAgentsAdapter
+        Configured SmolAgentsAdapter
         
     Example:
         from smolagents import CodeAgent
@@ -249,12 +249,12 @@ def create_smolagents_adapter(agent: Any,
     if hasattr(agent, 'tools') and 'code' in str(type(agent).__name__).lower():
         return CodeAgentAdapter(rails, agent)
     
-    return SmolaAgentsAdapter(rails, agent)
+    return SmolAgentsAdapter(rails, agent)
 
 
-# Decorator for wrapping SmolaAgents agents with Rails
+# Decorator for wrapping SmolAgents agents with Rails
 def with_rails(rails: Optional[Rails] = None):
-    """Decorator to wrap SmolaAgents agent creation with Rails.
+    """Decorator to wrap SmolAgents agent creation with Rails.
     
     Args:
         rails: Rails instance to use
