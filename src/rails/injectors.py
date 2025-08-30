@@ -1,198 +1,199 @@
-"""Injection strategies for Rails message manipulation."""
+"""Message injection strategies for Rails lifecycle orchestration."""
 
-from typing import List, Dict, Any
-from .types import Message, Injector
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+
+from pydantic import BaseModel, ConfigDict
+
+from .store import Store
+from .types import Condition, Message, Role
 
 
-class AppendInjector:
-    """Injector that appends message to the end of the message chain."""
-    
-    def __init__(self):
-        """Initialize append injector."""
-        pass
-        
-    def inject(self, messages: List[Message], new_message: Message) -> List[Message]:
-        """Append message to end of chain.
+class InjectorBase(BaseModel, ABC):
+    """Base class for all message injectors."""
+
+    name: str | None = None
+    description: str | None = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @abstractmethod
+    async def inject(self, messages: list[Message]) -> list[Message]:
+        """Inject message(s) into the conversation.
         
         Args:
             messages: Current message chain
-            new_message: Message to append
             
         Returns:
-            Message chain with new message appended
+            Modified message chain
         """
-        return messages + [new_message]
-        
-    def __str__(self) -> str:
-        return "AppendInjector"
+        ...
+
+    def describe(self) -> str:
+        """Get human-readable description."""
+        return self.description or self.__class__.__name__
 
 
-class PrependInjector:
-    """Injector that prepends message to the beginning of the message chain."""
-    
-    def __init__(self):
-        """Initialize prepend injector."""
-        pass
-        
-    def inject(self, messages: List[Message], new_message: Message) -> List[Message]:
-        """Prepend message to beginning of chain.
-        
-        Args:
-            messages: Current message chain
-            new_message: Message to prepend
-            
-        Returns:
-            Message chain with new message prepended
-        """
-        return [new_message] + messages
-        
-    def __str__(self) -> str:
-        return "PrependInjector"
+class AppendInjector(InjectorBase):
+    """Appends message to the end of the conversation."""
 
+    message: Message
 
-class InsertInjector:
-    """Injector that inserts message at a specific position in the chain."""
-    
-    def __init__(self, position: int):
-        """Initialize insert injector.
-        
-        Args:
-            position: Position to insert at (0-based index)
-        """
-        self.position = position
-        
-    def inject(self, messages: List[Message], new_message: Message) -> List[Message]:
-        """Insert message at specific position.
-        
-        Args:
-            messages: Current message chain
-            new_message: Message to insert
-            
-        Returns:
-            Message chain with new message inserted
-        """
+    async def inject(self, messages: list[Message]) -> list[Message]:
+        """Append a message to the end."""
         result = messages.copy()
-        # Handle negative indices and out-of-bounds positions
-        insert_pos = min(max(0, self.position), len(result))
-        result.insert(insert_pos, new_message)
+        result.append(self.message)
         return result
-        
-    def __str__(self) -> str:
-        return f"InsertInjector(position={self.position})"
 
 
-class ReplaceInjector:
-    """Injector that replaces messages in the chain based on criteria."""
-    
-    def __init__(self, replace_last: bool = False, replace_all: bool = False, 
-                 filter_func=None):
-        """Initialize replace injector.
-        
-        Args:
-            replace_last: Replace only the last message
-            replace_all: Replace all messages with the new message
-            filter_func: Function to filter which messages to replace
-        """
-        self.replace_last = replace_last
-        self.replace_all = replace_all
-        self.filter_func = filter_func
-        
-    def inject(self, messages: List[Message], new_message: Message) -> List[Message]:
-        """Replace messages based on strategy.
-        
-        Args:
-            messages: Current message chain
-            new_message: Message to use as replacement
-            
-        Returns:
-            Message chain with replacements applied
-        """
-        if self.replace_all:
-            return [new_message]
-            
-        if self.replace_last and messages:
-            return messages[:-1] + [new_message]
-            
-        if self.filter_func:
-            result = []
-            for msg in messages:
-                if self.filter_func(msg):
-                    result.append(new_message)
-                else:
-                    result.append(msg)
-            return result
-            
-        # Default behavior: append if no specific replacement strategy
-        return messages + [new_message]
-        
-    def __str__(self) -> str:
-        strategy = []
-        if self.replace_all:
-            strategy.append("replace_all")
-        if self.replace_last:
-            strategy.append("replace_last")
-        if self.filter_func:
-            strategy.append("filter_func")
-        return f"ReplaceInjector({', '.join(strategy)})"
+class PrependInjector(InjectorBase):
+    """Prepends message to the beginning of the conversation."""
+
+    message: Message
+
+    async def inject(self, messages: list[Message]) -> list[Message]:
+        """Prepend a message to the beginning."""
+        result = messages.copy()
+        result.insert(0, self.message)
+        return result
 
 
-class ConditionalInjector:
-    """Injector that conditionally applies another injector based on message content."""
-    
-    def __init__(self, base_injector: Injector, condition_func):
-        """Initialize conditional injector.
-        
-        Args:
-            base_injector: Underlying injector to use
-            condition_func: Function that takes (messages, new_message) -> bool
-        """
-        self.base_injector = base_injector
-        self.condition_func = condition_func
-        
-    def inject(self, messages: List[Message], new_message: Message) -> List[Message]:
-        """Conditionally apply injection.
-        
-        Args:
-            messages: Current message chain
-            new_message: Message to potentially inject
-            
-        Returns:
-            Original or modified message chain
-        """
-        if self.condition_func(messages, new_message):
-            return self.base_injector.inject(messages, new_message)
+class InsertInjector(InjectorBase):
+    """Inserts message at a specific index."""
+
+    message: Message
+    index: int = 0
+
+    async def inject(self, messages: list[Message]) -> list[Message]:
+        """Insert a message at a specific index."""
+        result = messages.copy()
+        result.insert(self.index, self.message)
+        return result
+
+
+class ReplaceInjector(InjectorBase):
+    """Replaces all messages with new messages."""
+
+    messages: list[Message]
+
+    async def inject(self, messages: list[Message]) -> list[Message]:
+        """Replace all messages with new messages."""
+        return self.messages.copy()
+
+
+class ConditionalInjector(InjectorBase):
+    """Conditionally inject based on Store state."""
+
+    condition: Condition
+    injector: InjectorBase
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    async def inject(self, messages: list[Message]) -> list[Message]:
+        """Conditionally inject based on Store state."""
+        from .core import current_rails
+        try:
+            rails = current_rails()
+            store = rails.store
+        except RuntimeError:
+            store = Store()  # Fallback if no Rails context
+
+        if await self.condition.evaluate(store):
+            return await self.injector.inject(messages)
         return messages
-        
-    def __str__(self) -> str:
-        return f"ConditionalInjector({self.base_injector})"
 
 
-# Convenience factory functions
-def append() -> AppendInjector:
-    """Create an append injector."""
-    return AppendInjector()
+class SystemInjector(InjectorBase):
+    """Inject system message using template."""
+
+    message: Message
+
+    async def inject(self, messages: list[Message]) -> list[Message]:
+        """Inject system message using template."""
+        result = messages.copy()
+        result.append(self.message)
+        return result
 
 
-def prepend() -> PrependInjector:
-    """Create a prepend injector."""
-    return PrependInjector()
+class TemplateInjector(InjectorBase):
+    """Injects messages using templates with store values."""
+
+    template: str
+    role: Role = Role.SYSTEM
+
+    async def inject(self, messages: list[Message]) -> list[Message]:
+        """Inject templated message."""
+        # Get context from Rails store
+        from .core import current_rails
+        try:
+            rails = current_rails()
+            context_vars = await rails.store.get_snapshot()
+            # Merge state for template
+            template_context = {**context_vars.get('state', {}), **context_vars.get('counters', {})}
+        except RuntimeError:
+            template_context = {}
+
+        # Use format_map which allows missing keys
+        try:
+            content = self.template.format_map(template_context)
+        except KeyError:
+            # Fallback: use the template as-is if keys are missing
+            content = self.template
+
+        msg = Message(role=self.role, content=content, injected_by_rails=True)
+
+        result = messages.copy()
+        result.append(msg)
+        return result
 
 
-def insert_at(position: int) -> InsertInjector:
-    """Create an insert injector for specific position."""
-    return InsertInjector(position)
+# Factory functions for common patterns
+def append_message(message: Message) -> Callable:
+    """Factory for appending messages."""
+    injector = AppendInjector(message=message)
+
+    async def action(messages: list[Message]) -> list[Message]:
+        return await injector.inject(messages)
+
+    return action
 
 
-def replace_last() -> ReplaceInjector:
-    """Create injector that replaces the last message."""
-    return ReplaceInjector(replace_last=True)
+def prepend_message(message: Message) -> Callable:
+    """Factory for prepending messages."""
+    injector = PrependInjector(message=message)
+
+    async def action(messages: list[Message]) -> list[Message]:
+        return await injector.inject(messages)
+
+    return action
 
 
-def replace_all() -> ReplaceInjector:
-    """Create injector that replaces all messages."""
-    return ReplaceInjector(replace_all=True)
+def system(content: str, position: str = "append") -> Callable:
+    """Factory for system messages."""
+    async def action(messages: list[Message]) -> list[Message]:
+        msg = Message(role=Role.SYSTEM, content=content, injected_by_rails=True)
+        result = messages.copy()
+        if position == "prepend":
+            result.insert(0, msg)
+        else:
+            result.append(msg)
+        return result
+
+    return action
 
 
-def replace_where(filter_func) -> ReplaceInjector:
-    """Create injector that replaces messages matching filter."""
-    return ReplaceInjector(filter_func=filter_func)
+def template(tpl: str, role: Role = Role.SYSTEM) -> Callable:
+    """Factory for templated messages.
+    
+    Usage:
+        rails.add_rule(
+            condition=state("user_name").exists,
+            action=template("Hello {user_name}!")
+        )
+    """
+    injector = TemplateInjector(template=tpl, role=role)
+
+    async def action(messages: list[Message]) -> list[Message]:
+        return await injector.inject(messages)
+
+    return action

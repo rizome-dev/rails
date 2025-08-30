@@ -7,24 +7,22 @@ to define setup/cleanup logic that can be easily composed and managed.
 """
 
 import asyncio
-import functools
 import inspect
+from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import Any, Callable, Dict, List, Optional, Union, AsyncGenerator
 from dataclasses import dataclass
-
-from .types import Message
+from typing import Any
 
 
 @dataclass
 class LifecycleFunction:
     """Represents a modular lifecycle function with setup and cleanup phases."""
-    
+
     name: str
     func: Callable
     priority: int = 0
-    dependencies: List[str] = None
-    
+    dependencies: list[str] = None
+
     def __post_init__(self):
         if self.dependencies is None:
             self.dependencies = []
@@ -32,13 +30,13 @@ class LifecycleFunction:
 
 class LifecycleRegistry:
     """Registry for managing lifecycle functions and their execution order."""
-    
+
     def __init__(self):
-        self._functions: Dict[str, LifecycleFunction] = {}
-        self._active_contexts: Dict[str, Any] = {}
-        
-    def register(self, name: str, func: Callable, priority: int = 0, 
-                 dependencies: List[str] = None) -> None:
+        self._functions: dict[str, LifecycleFunction] = {}
+        self._active_contexts: dict[str, Any] = {}
+
+    def register(self, name: str, func: Callable, priority: int = 0,
+                 dependencies: list[str] = None) -> None:
         """Register a lifecycle function."""
         lifecycle_func = LifecycleFunction(
             name=name,
@@ -47,23 +45,23 @@ class LifecycleRegistry:
             dependencies=dependencies or []
         )
         self._functions[name] = lifecycle_func
-        
-    def get_execution_order(self) -> List[str]:
+
+    def get_execution_order(self) -> list[str]:
         """Get lifecycle functions in execution order based on priorities and dependencies."""
         # Simple topological sort for dependencies + priority ordering
         functions = list(self._functions.values())
-        
+
         # Sort by priority first (higher priority = earlier execution)
         functions.sort(key=lambda f: f.priority, reverse=True)
-        
+
         # TODO: Add proper dependency resolution for complex cases
         return [f.name for f in functions]
-        
-    def get_function(self, name: str) -> Optional[LifecycleFunction]:
+
+    def get_function(self, name: str) -> LifecycleFunction | None:
         """Get a lifecycle function by name."""
         return self._functions.get(name)
-        
-    def list_functions(self) -> List[str]:
+
+    def list_functions(self) -> list[str]:
         """List all registered lifecycle function names."""
         return list(self._functions.keys())
 
@@ -72,8 +70,8 @@ class LifecycleRegistry:
 _lifecycle_registry = LifecycleRegistry()
 
 
-def lifecycle_function(name: Optional[str] = None, priority: int = 0, 
-                      dependencies: List[str] = None):
+def lifecycle_function(name: str | None = None, priority: int = 0,
+                      dependencies: list[str] = None):
     """
     Decorator for creating modular lifecycle functions.
     
@@ -102,7 +100,7 @@ def lifecycle_function(name: Optional[str] = None, priority: int = 0,
     """
     def decorator(func: Callable) -> Callable:
         func_name = name or func.__name__
-        
+
         # Register the function
         _lifecycle_registry.register(
             name=func_name,
@@ -110,20 +108,20 @@ def lifecycle_function(name: Optional[str] = None, priority: int = 0,
             priority=priority,
             dependencies=dependencies
         )
-        
+
         # Mark function as lifecycle function
         func._is_lifecycle_function = True
         func._lifecycle_name = func_name
         func._lifecycle_priority = priority
         func._lifecycle_dependencies = dependencies or []
-        
+
         return func
-        
+
     return decorator
 
 
 @asynccontextmanager
-async def with_lifecycle_functions(rails_instance, lifecycle_funcs: List[Union[str, Callable]]):
+async def with_lifecycle_functions(rails_instance, lifecycle_funcs: list[str | Callable]):
     """
     Context manager for composing multiple lifecycle functions.
     
@@ -141,7 +139,7 @@ async def with_lifecycle_functions(rails_instance, lifecycle_funcs: List[Union[s
             resolved_funcs.append(lifecycle_func.func)
         else:
             resolved_funcs.append(func_ref)
-    
+
     # Start all lifecycle functions
     contexts = []
     try:
@@ -155,10 +153,10 @@ async def with_lifecycle_functions(rails_instance, lifecycle_funcs: List[Union[s
                 # Regular async function - call it
                 result = await func(rails_instance)
                 contexts.append(result)
-        
+
         # Yield control for main execution
         yield
-        
+
     finally:
         # Cleanup in reverse order
         for ctx in reversed(contexts):
@@ -172,13 +170,13 @@ async def with_lifecycle_functions(rails_instance, lifecycle_funcs: List[Union[s
 
 class LifecycleManager:
     """Manager for orchestrating lifecycle functions and workflow execution."""
-    
+
     def __init__(self, rails_instance):
         self.rails = rails_instance
-        self._active_functions: List[str] = []
-        self._execution_context: Dict[str, Any] = {}
-        
-    async def execute_with_lifecycle(self, lifecycle_funcs: List[Union[str, Callable]], 
+        self._active_functions: list[str] = []
+        self._execution_context: dict[str, Any] = {}
+
+    async def execute_with_lifecycle(self, lifecycle_funcs: list[str | Callable],
                                    workflow: Callable, *args, **kwargs):
         """
         Execute a workflow with specified lifecycle functions.
@@ -193,7 +191,7 @@ class LifecycleManager:
             self._active_functions = [
                 f.__name__ if callable(f) else f for f in lifecycle_funcs
             ]
-            
+
             try:
                 if inspect.iscoroutinefunction(workflow):
                     return await workflow(*args, **kwargs)
@@ -201,19 +199,19 @@ class LifecycleManager:
                     return workflow(*args, **kwargs)
             finally:
                 self._active_functions.clear()
-                
-    def get_active_functions(self) -> List[str]:
+
+    def get_active_functions(self) -> list[str]:
         """Get list of currently active lifecycle function names."""
         return self._active_functions.copy()
-        
+
     def set_context(self, key: str, value: Any) -> None:
         """Set a value in the execution context."""
         self._execution_context[key] = value
-        
+
     def get_context(self, key: str, default: Any = None) -> Any:
         """Get a value from the execution context."""
         return self._execution_context.get(key, default)
-        
+
     def clear_context(self) -> None:
         """Clear the execution context."""
         self._execution_context.clear()
@@ -227,9 +225,9 @@ async def counter_tracker_lifecycle(rails):
     # Setup: Initialize tracking
     start_time = asyncio.get_event_loop().time()
     rails.store.set_sync('lifecycle_start_time', start_time)
-    
+
     yield  # Main execution
-    
+
     # Cleanup: Log final counts
     end_time = asyncio.get_event_loop().time()
     duration = end_time - start_time
@@ -245,14 +243,14 @@ async def error_handler_lifecycle(rails):
         # Handle errors and potentially inject recovery messages
         await rails.store.increment('lifecycle_errors')
         rails.store.set_sync('last_error', str(e))
-        
+
         # Could inject recovery message here
         # This is where tools could manipulate the rails instance
         recovery_message = {
             "role": "system",
             "content": f"Error occurred during execution: {e}. Attempting recovery..."
         }
-        
+
         # Tools can access rails instance to add conditional recovery
         error_count = await rails.store.get_counter('lifecycle_errors', 0)
         if error_count >= 3:
@@ -261,5 +259,5 @@ async def error_handler_lifecycle(rails):
                 "role": "system",
                 "content": "🛑 Multiple errors detected. Stopping execution for safety."
             })
-        
+
         raise  # Re-raise the exception

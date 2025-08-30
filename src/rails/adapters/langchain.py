@@ -5,11 +5,16 @@ allowing Rails conditional message injection to work with any LangChain chain,
 agent, or chat model.
 """
 
-from typing import List, Dict, Any, Optional, Union
 import asyncio
+from typing import Any
 
 try:
-    from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+    from langchain_core.messages import (
+        AIMessage,
+        BaseMessage,
+        HumanMessage,
+        SystemMessage,
+    )
     from langchain_core.runnables import Runnable
     LANGCHAIN_AVAILABLE = True
 except ImportError:
@@ -18,9 +23,9 @@ except ImportError:
     Runnable = Any
     LANGCHAIN_AVAILABLE = False
 
-from .base import BaseRailsAdapter
 from ..core import Rails
 from ..types import Message
+from .base import BaseRailsAdapter
 
 
 class LangChainAdapter(BaseRailsAdapter):
@@ -50,8 +55,8 @@ class LangChainAdapter(BaseRailsAdapter):
         messages = [{"role": "user", "content": "Hello!"}]
         result = await adapter.run(messages)
     """
-    
-    def __init__(self, rails: Optional[Rails] = None, runnable: Optional[Runnable] = None):
+
+    def __init__(self, rails: Rails | None = None, runnable: Runnable | None = None):
         """Initialize the LangChain adapter.
         
         Args:
@@ -60,14 +65,14 @@ class LangChainAdapter(BaseRailsAdapter):
         """
         super().__init__(rails)
         self.runnable = runnable
-        
+
         if not LANGCHAIN_AVAILABLE:
             raise ImportError(
                 "LangChain is not installed. Install it with: pip install langchain-core"
             )
-    
-    async def process_messages(self, messages: List[Message], 
-                             runnable: Optional[Runnable] = None, **kwargs) -> Any:
+
+    async def process_messages(self, messages: list[Message],
+                             runnable: Runnable | None = None, **kwargs) -> Any:
         """Process messages through LangChain runnable.
         
         Args:
@@ -79,22 +84,22 @@ class LangChainAdapter(BaseRailsAdapter):
             LangChain runnable result
         """
         target_runnable = runnable or self.runnable
-        
+
         if target_runnable is None:
             raise ValueError("No runnable provided. Pass one to __init__ or process_messages")
-        
+
         # Convert Rails messages to LangChain messages
         lc_messages = [self.convert_from_rails_message(msg) for msg in messages]
-        
+
         # Run through LangChain
         if asyncio.iscoroutinefunction(target_runnable.invoke):
             result = await target_runnable.ainvoke(lc_messages, **kwargs)
         else:
             result = target_runnable.invoke(lc_messages, **kwargs)
-        
+
         return result
-    
-    def convert_to_rails_message(self, message: Union[BaseMessage, Dict[str, Any]]) -> Message:
+
+    def convert_to_rails_message(self, message: BaseMessage | dict[str, Any]) -> Message:
         """Convert LangChain message to Rails message format.
         
         Args:
@@ -105,17 +110,17 @@ class LangChainAdapter(BaseRailsAdapter):
         """
         if isinstance(message, dict):
             return message
-        
+
         # Convert LangChain BaseMessage to dict
         if hasattr(message, 'type') and hasattr(message, 'content'):
             return {
                 "role": self._get_role_from_type(message.type),
                 "content": message.content
             }
-        
+
         # Fallback for unknown message types
         return {"role": "user", "content": str(message)}
-    
+
     def convert_from_rails_message(self, message: Message) -> BaseMessage:
         """Convert Rails message to LangChain BaseMessage.
         
@@ -127,14 +132,14 @@ class LangChainAdapter(BaseRailsAdapter):
         """
         role = message.get("role", "user")
         content = message.get("content", "")
-        
+
         if role == "system":
             return SystemMessage(content=content)
         elif role == "assistant" or role == "ai":
             return AIMessage(content=content)
         else:  # user, human, or any other role
             return HumanMessage(content=content)
-    
+
     def _get_role_from_type(self, message_type: str) -> str:
         """Map LangChain message type to Rails role.
         
@@ -152,9 +157,9 @@ class LangChainAdapter(BaseRailsAdapter):
             "user": "user"
         }
         return type_to_role.get(message_type, "user")
-    
-    async def update_rails_state(self, original_messages: List[Message], 
-                               modified_messages: List[Message], result: Any) -> None:
+
+    async def update_rails_state(self, original_messages: list[Message],
+                               modified_messages: list[Message], result: Any) -> None:
         """Update Rails state after LangChain processing.
         
         Args:
@@ -163,15 +168,15 @@ class LangChainAdapter(BaseRailsAdapter):
             result: LangChain processing result
         """
         await super().update_rails_state(original_messages, modified_messages, result)
-        
+
         # Track LangChain-specific metrics
         if hasattr(result, 'usage_metadata'):
-            await self.rails.store.increment("langchain_tokens", 
+            await self.rails.store.increment("langchain_tokens",
                                            result.usage_metadata.get("total_tokens", 0))
 
 
-def create_langchain_adapter(runnable: Runnable, 
-                           rails: Optional[Rails] = None) -> LangChainAdapter:
+def create_langchain_adapter(runnable: Runnable,
+                           rails: Rails | None = None) -> LangChainAdapter:
     """Factory function to create a LangChain Rails adapter.
     
     Args:
@@ -206,7 +211,7 @@ def create_langchain_adapter(runnable: Runnable,
 
 
 # Decorator for wrapping LangChain runnables with Rails
-def with_rails(rails: Optional[Rails] = None):
+def with_rails(rails: Rails | None = None):
     """Decorator to wrap LangChain runnables with Rails.
     
     Args:

@@ -1,8 +1,8 @@
-# Rails | Put your agents on rails
+# Rails | Lifecycle Orchestration for AI Agents
 
-**Production-grade lifecycle management for AI agents - inject context and execute workflows when conditions are met**
+**Production-grade lifecycle orchestration for AI agents - monitor execution state and inject contextual guidance at critical moments**
 
-Rails provides a comprehensive, framework-agnostic system for surgical control over AI agent behavior. Inject messages, execute workflows, compose lifecycle functions, and orchestrate complex patterns - all triggered by your custom conditions. No forced lifecycle phases, maximum flexibility.
+Rails provides a framework-agnostic orchestration layer that creates a bidirectional communication channel between your agents and their lifecycle. Through a shared state store accessible to both Rails conditions and agent tools, Rails enables sophisticated feedback loops and intervention patterns.
 
 ```bash
 pip install agent-rails
@@ -16,466 +16,500 @@ pdm add agent-rails
 
 ```python
 import asyncio
-from rails import Rails, current_rails, lifecycle_function
+from rails import Rails, current_rails, counter, state, queue
 
 # Define a tool that accesses Rails
-def api_tool(data):
+def fetch_data(data):
     rails = current_rails()  # Access Rails from within tools
     rails.store.increment_sync('api_calls')
+    
+    # Tool can push tasks to queues
+    if data.get('needs_processing'):
+        rails.store.push_queue_sync('tasks', data['item'])
+    
     return {"processed": True, "calls": rails.store.get_counter_sync('api_calls')}
 
-# Define composable lifecycle function
-@lifecycle_function(priority=10)
-async def setup_monitoring(rails):
-    rails.store.set_sync('monitoring_active', True)
-    print("🔧 Monitoring started")
-    yield  # Main execution happens here
-    print("🔧 Monitoring stopped")
-
-# Define workflow function
-async def error_recovery(rails):
-    print("🔄 Running error recovery workflow")
-    rails.store.set_counter_sync('errors', 0)
-
 async def main():
-    # Create Rails with lifecycle functions
-    rails = Rails().with_lifecycle(setup_monitoring)
+    rails = Rails()
     
-    # Message injection: When errors occur, inject helpful message
-    rails.when(lambda s: s.get_counter_sync('errors') >= 2).inject({
-        "role": "system", 
-        "content": "Multiple errors detected. Switching to recovery mode."
-    })
-    
-    # Workflow execution: When API calls exceed limit, run background optimization
-    rails.when(lambda s: s.get_counter_sync('api_calls') >= 5).then(
-        lambda r: print("⚡ Running optimization..."), background=True
+    # Fluent condition builders with message injection
+    rails.add_rule(
+        condition=counter("errors") >= 2,
+        action=lambda msgs: msgs + [{
+            "role": "system", 
+            "content": "Multiple errors detected. Switching to recovery mode."
+        }]
     )
     
-    # Error recovery workflow
-    rails.when(lambda s: s.get_counter_sync('errors') >= 3).then(error_recovery)
+    # Queue-based orchestration
+    rails.add_rule(
+        condition=queue("tasks").length > 5,
+        action=lambda msgs: msgs + [{
+            "role": "system",
+            "content": "Task queue is growing. Focus on completion before taking new tasks."
+        }]
+    )
     
-    # Use Rails with automatic lifecycle management
-    async with rails:
+    # State-based guidance
+    rails.add_rule(
+        condition=state("mode") == "exploration",
+        action=lambda msgs: msgs + [{
+            "role": "system",
+            "content": "In exploration mode - be thorough but watch for diminishing returns."
+        }]
+    )
+    
+    async with rails:  # Context manager handles lifecycle
         messages = [{"role": "user", "content": "Help me process data"}]
         
-        # Simulate tool calls and errors
+        # Simulate tool calls and state changes
         for i in range(6):
-            result = api_tool({"item": i})
-            if i > 3: rails.store.increment_sync('errors')
+            result = fetch_data({"item": i, "needs_processing": i > 2})
+            if i > 3: 
+                await rails.store.increment('errors')
             
-            # Check conditions - both inject messages AND execute workflows
-            messages = await rails.check(messages)
+            # Process messages through Rails conditions
+            from rails import Message, Role
+            rail_messages = [Message(role=Role(m["role"].upper()), content=m["content"]) for m in messages]
+            processed = await rails.process(rail_messages)
             
-            # Display any Rails messages
-            for msg in messages:
-                if "system" in msg.get("role", ""):
-                    print(f"💬 Rails: {msg['content']}")
+            # Display any injected guidance
+            for msg in processed[len(rail_messages):]:
+                print(f"💬 Rails: {msg.content}")
 
 asyncio.run(main())
 ```
 
-# Documentation
+## Architectural Principles
 
-## Core Features
+Rails implements a **bidirectional shared state model** that enables sophisticated lifecycle orchestration:
 
-### 1. Message Injection - `when().inject()`
+```
+Agent Tools (Write State) ←→ Rails Store (Monitor State) ←→ Rails Conditions (Inject Context)
+```
 
-Conditionally inject messages into agent conversations:
+## Core Components
+
+### 1. Fluent Condition Builders
+
+Rails provides intuitive condition builders for common patterns:
 
 ```python
-from rails import Rails, CounterCondition, StateCondition
+from rails import Rails, counter, state, queue
 
 rails = Rails()
 
-# Lambda conditions for custom logic
-rails.when(lambda s: s.get_counter_sync('errors') >= 3).inject({
-    "role": "system",
-    "content": "Multiple errors detected. Switching to recovery mode."
-})
-
-# Built-in condition types for common patterns
-rails.when(CounterCondition('attempts', 5, '>=')).inject(retry_message)
-rails.when(StateCondition('mode', 'expert')).inject(expert_guidance)
-
-# Multiple injection strategies
-rails.when(condition).inject(message)  # append (default)
-rails.when(condition).inject(message, strategy='prepend')  # add to start
-rails.when(condition).inject(message, strategy='replace_last')  # replace last
-
-# Convenience methods
-rails.on_counter('turns', 10, stop_message)
-rails.on_state('debug_mode', True, debug_message)
-
-# Apply all conditions and get enhanced messages
-enhanced_messages = await rails.check(original_messages)
-```
-
-### 2. Workflow Execution - `when().then()`
-
-Execute functions and workflows when conditions are met:
-
-```python
-from rails import Rails
-
-rails = Rails()
-
-# Execute function when condition met
-async def error_recovery(rails):
-    print("Running error recovery...")
-    rails.store.set_counter_sync('errors', 0)
-    
-rails.when(lambda s: s.get_counter_sync('errors') >= 3).then(error_recovery)
-
-# Execute in background (non-blocking)
-rails.when(condition).then(
-    optimization_workflow, 
-    background=True,  # runs asynchronously
-    name="background_optimizer"
+# Counter conditions with comparison operators
+rails.add_rule(
+    condition=counter("api_calls") >= 10,
+    action=lambda msgs: msgs + [{"role": "system", "content": "API limit approaching"}]
 )
 
-# Pass additional arguments
-rails.when(condition).then(
-    custom_workflow, 
-    arg1, arg2,  # positional args
-    param1="value",  # keyword args
-    background=False
+# State conditions with equality checks
+rails.add_rule(
+    condition=state("mode") == "production",
+    action=lambda msgs: msgs + [{"role": "system", "content": "In production - be careful"}]
 )
 
-# Lambda functions for simple workflows
-rails.when(condition).then(lambda r: r.store.set('recovery_mode', True))
+# Queue conditions for task management
+rails.add_rule(
+    condition=queue("errors").is_empty,
+    action=lambda msgs: msgs + [{"role": "system", "content": "All errors resolved!"}]
+)
+
+# Composite conditions
+from rails import AndCondition, OrCondition, NotCondition
+
+complex_condition = AndCondition(
+    counter("attempts") >= 3,
+    state("retry_enabled") == True
+)
+rails.add_rule(condition=complex_condition, action=retry_handler)
 ```
 
-### 3. Composable Lifecycle Functions - `@lifecycle_function`
+### 2. Shared State Store
 
-Create modular, reusable lifecycle components:
+The Rails store provides thread-safe state management accessible to both Rails and agent tools:
 
 ```python
-from rails import Rails, lifecycle_function
+from rails import Rails, current_rails
 
-@lifecycle_function(name="database", priority=10)
-async def database_lifecycle(rails):
-    # Setup phase
-    connection = await create_db_connection()
-    rails.store.set_sync('db_connection', connection)
-    print("🔧 Database connected")
+async with Rails() as rails:
+    # Counters - for tracking numeric values
+    await rails.store.increment("api_calls")  # +1
+    await rails.store.increment("errors", 5)  # +5
+    await rails.store.reset_counter("retries")
+    count = await rails.store.get_counter("api_calls")
     
-    yield  # Main execution happens here
+    # State values - for arbitrary data
+    await rails.store.set("user_tier", "premium")
+    await rails.store.set("config", {"debug": True, "timeout": 30})
+    tier = await rails.store.get("user_tier", default="standard")
     
-    # Cleanup phase
-    await connection.close()
-    print("🔧 Database disconnected")
-
-@lifecycle_function(name="monitoring", priority=5)
-async def monitoring_lifecycle(rails):
-    # Setup monitoring
-    rails.store.set_sync('monitoring_active', True)
+    # Queues - for task management (FIFO by default)
+    await rails.store.push_queue("tasks", "process_data")
+    await rails.store.push_queue("tasks", "generate_report")
+    task = await rails.store.pop_queue("tasks")  # "process_data"
+    pending = await rails.store.queue_length("tasks")  # 1
+    all_tasks = await rails.store.get_queue("tasks")  # ["generate_report"]
     
-    # Add conditional rules during setup
-    rails.when(lambda s: s.get_counter_sync('errors') >= 5).inject({
-        "role": "system",
-        "content": "🚨 High error rate detected!"
-    })
-    
-    yield
-    
-    # Cleanup monitoring
-    rails.store.set_sync('monitoring_active', False)
-
-# Compose multiple lifecycle functions
-rails = Rails().with_lifecycle('database', 'monitoring', custom_lifecycle)
-
-# Or compose with function references
-rails = Rails().with_lifecycle(database_lifecycle, monitoring_lifecycle)
+    # Synchronous versions for use in tools
+    rails.store.increment_sync("tool_calls")
+    rails.store.set_sync("last_tool", "calculator")
+    value = rails.store.get_sync("last_tool")
 ```
 
-### 4. Global Tool Access - `current_rails()`
+### 3. Tool Integration with `current_rails()`
 
-Tools can access and manipulate the Rails instance they're running within:
+Tools can access the Rails instance they're running within:
 
 ```python
 from rails import current_rails
 
-def api_client_tool(endpoint, data):
-    """Tool that tracks usage and adds conditional behaviors."""
-    rails = current_rails()  # Access the active Rails instance
+def data_processing_tool(data):
+    """Tool that participates in lifecycle orchestration."""
+    rails = current_rails()  # Get active Rails instance
     
-    # Track API usage
-    rails.store.increment_sync('api_calls')
-    rails.store.increment_sync(f'api_calls_{endpoint}')
+    # Track tool usage
+    rails.store.increment_sync('tool_calls')
+    rails.store.increment_sync(f'tool_calls_data_processing')
     
-    # Tool can add conditional rules based on its state
-    if rails.store.get_counter_sync('api_calls') >= 8:
-        rails.when(lambda s: s.get_counter_sync('api_calls') >= 10).inject({
-            "role": "system",
-            "content": "⚠️ API rate limit approaching. Consider throttling."
-        })
+    # Add tasks to queue for later processing
+    if data.get('requires_validation'):
+        rails.store.push_queue_sync('validation_queue', data['id'])
     
-    # Simulate API call
-    result = call_external_api(endpoint, data)
+    # Update state based on tool results
+    try:
+        result = process_data(data)
+        rails.store.increment_sync('successful_processing')
+    except Exception as e:
+        rails.store.increment_sync('processing_errors')
+        rails.store.push_queue_sync('error_log', str(e))
+        result = None
     
-    # Track errors
-    if not result.get('success'):
-        rails.store.increment_sync('api_errors')
+    # Check if we should slow down
+    if rails.store.get_counter_sync('processing_errors') > 5:
+        rails.store.set_sync('mode', 'careful')
     
     return result
 
 # Tools automatically access Rails when called within Rails context
 async with Rails() as rails:
-    result = api_client_tool('process', {'data': 'value'})  # Works seamlessly
+    # Tool can now use current_rails() to access the store
+    result = data_processing_tool({'data': 'value', 'requires_validation': True})
 ```
 
-## Advanced Features
+### 4. Message Injection System
 
-### 5. Background Execution & Orchestration
-
-Execute complex workflows with proper concurrency and orchestration:
+Rails uses a functional approach to message transformation:
 
 ```python
-from rails import Rails, WorkflowOrchestrator, execute_background_workflow
+from rails import Rails, Message, Role
+from rails import AppendInjector, PrependInjector, ReplaceInjector
+from rails import system, template
 
-async def complex_data_processing(rails):
-    # Long-running data processing
-    await process_large_dataset()
-    return {"processed": True}
-
-async def quick_validation(rails):  
-    # Quick validation task
-    return {"valid": True}
-
-# Background execution
 rails = Rails()
 
-async with rails:
-    # Execute single workflow in background
-    task_id = await execute_background_workflow(
-        complex_data_processing, 
-        rails_instance=rails,
-        task_id="data_proc_001"
-    )
-    
-    # Continue other work while background task runs
-    messages = await rails.check(messages)
-    
-    # Advanced orchestration
-    orchestrator = WorkflowOrchestrator(rails, max_concurrent=3)
-    
-    async with orchestrator.orchestration_context():
-        # Conditional pipeline - steps run based on conditions
-        pipeline_steps = [
-            (lambda s: True, initialize_system),
-            (lambda s: s.get_counter_sync('items') > 0, process_items),
-            (lambda s: s.get_sync('validation_required'), validate_results),
-            (lambda s: True, finalize_results)
-        ]
-        
-        pipeline_results = await orchestrator.execute_conditional_pipeline(pipeline_steps)
-        
-        # Parallel execution
-        parallel_workflows = [complex_data_processing, quick_validation, cleanup_temp_data]
-        parallel_results = await orchestrator.execute_parallel_workflows(
-            parallel_workflows, 
-            wait_all=True
-        )
-```
-
-### 6. Built-in Condition Types
-
-Rails provides powerful condition primitives:
-
-```python
-from rails import (
-    CounterCondition, StateCondition, LambdaCondition,
-    AndCondition, OrCondition, NotCondition
+# Simple function-based injection
+rails.add_rule(
+    condition=counter("errors") > 0,
+    action=lambda msgs: msgs + [Message(role=Role.SYSTEM, content="Error detected")]
 )
 
-# Counter conditions with operators
-rails.when(CounterCondition('api_calls', 10, '>=')).inject(rate_limit_msg)
-rails.when(CounterCondition('errors', 0, '==')).inject(success_msg)
+# Using injector classes
+error_injector = AppendInjector(
+    message=Message(role=Role.SYSTEM, content="Please review the errors")
+)
+rails.add_rule(
+    condition=counter("errors") >= 3,
+    action=error_injector.inject
+)
 
-# State conditions
-rails.when(StateCondition('mode', 'production')).inject(prod_warning)
-rails.when(StateCondition('user_tier', 'premium')).inject(premium_features)
+# Factory functions for common patterns
+rails.add_rule(
+    condition=state("mode") == "debug",
+    action=system("Debug mode active - verbose output enabled")
+)
 
-# Logical combinations
-complex_condition = AndCondition([
-    CounterCondition('attempts', 3, '>='),
-    StateCondition('auto_retry', True)
-])
-rails.when(complex_condition).then(auto_retry_workflow)
+# Template injection with store values
+rails.add_rule(
+    condition=state("user_name").exists,
+    action=template("Hello {user_name}, you have {api_calls} API calls remaining")
+)
 
-# Custom logic with lambda conditions
-rails.when(LambdaCondition(lambda s: 
-    s.get_counter_sync('success_rate') / s.get_counter_sync('total_attempts') < 0.5
-)).inject(low_success_warning)
+# Process messages through all rules
+messages = [Message(role=Role.USER, content="Hello")]
+processed = await rails.process(messages)
 ```
 
-## Framework Integration
+### 5. Event Streaming & Observability
 
-### 7. Framework Adapters
-
-Rails includes adapters for seamless integration with popular agent frameworks:
-
-```python
-from rails.adapters import create_adapter, BaseRailsAdapter
-
-# Generic adapter with any processing function
-def my_agent_processor(messages):
-    # Your agent processing logic here
-    return {"role": "assistant", "content": "Processed with Rails!"}
-
-adapter = create_adapter(rails, my_agent_processor)
-
-# Context manager handles Rails lifecycle automatically
-async with adapter as active_adapter:
-    result = await active_adapter.run(messages)
-```
-
-#### LangChain Integration
-
-```python
-from rails.adapters import LangChainAdapter
-from langchain.chat_models import ChatOpenAI
-from langchain.schema import HumanMessage
-
-# Set up Rails with conditions
-rails = Rails()
-rails.when(lambda s: s.get_counter_sync('messages') >= 3).inject({
-    "role": "system",
-    "content": "This conversation is getting long. Let me summarize..."
-})
-
-# Create LangChain adapter
-llm = ChatOpenAI(model="gpt-4")
-adapter = LangChainAdapter(rails, llm)
-
-# Rails automatically applies before LangChain processing
-messages = [HumanMessage(content="Help me debug this code")]
-result = await adapter.run(messages)
-```
-
-#### SmolAgents Integration
-
-```python
-from rails.adapters import SmolAgentsAdapter
-from smolagents import Agent
-
-# Set up Rails with agent-specific conditions
-rails = Rails()
-rails.when(lambda s: s.get_counter_sync('tool_calls') >= 5).inject({
-    "role": "system", 
-    "content": "I notice I'm using many tools. Let me focus on the core task."
-})
-
-# Create SmolAgents adapter  
-agent = Agent(model="gpt-4", tools=[web_search, calculator])
-adapter = SmolAgentsAdapter(rails, agent)
-
-result = await adapter.run("Research the latest AI developments and calculate ROI")
-```
-
-#### Custom Framework Adapter
-
-```python
-from rails.adapters import BaseRailsAdapter
-
-class MyFrameworkAdapter(BaseRailsAdapter):
-    def __init__(self, rails, my_agent):
-        super().__init__(rails)
-        self.agent = my_agent
-    
-    async def process_messages(self, messages, **kwargs):
-        # Convert Rails messages to your framework format
-        framework_messages = self.convert_messages(messages)
-        
-        # Process with your framework
-        result = await self.agent.process(framework_messages, **kwargs)
-        
-        # Update Rails state based on result
-        await self.rails.store.increment('framework_calls')
-        
-        return result
-    
-    async def update_rails_state(self, original_messages, modified_messages, result):
-        # Custom state updates beyond the default
-        await super().update_rails_state(original_messages, modified_messages, result)
-        
-        # Track framework-specific metrics
-        if result.get('tool_used'):
-            await self.rails.store.increment('tool_usage')
-
-# Usage
-adapter = MyFrameworkAdapter(rails, my_custom_agent)
-result = await adapter.run(messages)
-```
-
-### 8. State Management
-
-Rails provides comprehensive thread-safe state management:
+Rails emits events for all state changes, enabling monitoring and debugging:
 
 ```python
 from rails import Rails
 
-async with Rails() as rails:
-    # COUNTERS - for tracking numeric values
-    rails.store.increment_sync('api_calls')  # increment by 1
-    rails.store.increment_sync('errors', 5)  # increment by custom amount
-    rails.store.set_counter_sync('retries', 0)  # set to specific value
-    
-    current_calls = rails.store.get_counter_sync('api_calls', default=0)
-    has_errors = rails.store.get_counter_sync('errors') > 0
-    
-    # STATE VALUES - for storing arbitrary data  
-    rails.store.set_sync('user_tier', 'premium')
-    rails.store.set_sync('config', {'debug': True, 'retries': 3})
-    rails.store.set_sync('last_error', None)
-    
-    user_tier = rails.store.get_sync('user_tier', 'standard')
-    config = rails.store.get_sync('config', {})
-    has_config = rails.store.exists_sync('config')
-    
-    # ASYNC VERSIONS - for use in async contexts
-    await rails.store.increment('async_counter')
-    await rails.store.set('async_state', 'value')
-    value = await rails.store.get('async_state')
-    
-    # BULK OPERATIONS
-    await rails.store.clear()  # clear all state
-    rails.store.delete_sync('old_key')  # remove specific key
+rails = Rails()
+
+# Subscribe to events
+async def event_handler(event):
+    print(f"Event: {event.event_type} - {event.key} = {event.value}")
+
+rails.store.subscribe_events(event_handler)
+
+# All state changes emit events
+await rails.store.increment("counter", triggered_by="user_action")
+await rails.store.set("state", "active", triggered_by="system")
+await rails.store.push_queue("tasks", "item", triggered_by="tool")
+
+# Stream events for real-time monitoring
+async for event in rails.store.event_stream():
+    if event.event_type == "counter_increment":
+        print(f"Counter {event.key} changed: {event.previous_value} → {event.value}")
+
+# Get metrics snapshot
+metrics = await rails.emit_metrics()
+print(f"Active rules: {metrics['active_rules']}")
+print(f"Store snapshot: {metrics['store_snapshot']}")
 ```
 
-### 9. Context Manager & Lifecycle
+## Framework Integration
 
-Rails supports both manual and automatic lifecycle management:
+### Framework Adapters
+
+Rails provides adapters for seamless integration with popular frameworks:
 
 ```python
-# Automatic lifecycle with context manager (recommended)
-async with Rails() as rails:
-    # Rails instance available globally via current_rails()
-    rails.when(condition).inject(message)
-    rails.when(condition).then(workflow)
-    result = await rails.check(messages)
-    # Cleanup handled automatically on exit
+from rails import Rails
+from rails.adapters import create_adapter, BaseAdapter
 
-# Manual lifecycle management
+# Generic adapter for any processing function
+def my_agent(messages):
+    # Your agent logic here
+    return {"role": "assistant", "content": "Response"}
+
 rails = Rails()
-try:
-    rails_instance = await rails.__aenter__()  # Manual setup
-    # Use rails...
-    result = await rails.check(messages)
-finally:
-    await rails.__aexit__(None, None, None)  # Manual cleanup
+adapter = create_adapter(rails, my_agent)
 
-# With lifecycle functions
-async with Rails().with_lifecycle('database', 'monitoring') as rails:
-    # All lifecycle functions activated automatically
-    result = await rails.check(messages)
-    # Lifecycle functions cleaned up in reverse order
+async with adapter:
+    result = await adapter.process_messages(messages)
 ```
 
-# Installation & Development
+### LangChain Integration
 
-## Installation
+```python
+from rails import Rails, counter
+from rails.adapters import LangChainAdapter
+from langchain_openai import ChatOpenAI
+
+rails = Rails()
+
+# Add Rails conditions
+rails.add_rule(
+    condition=counter("messages") >= 5,
+    action=lambda msgs: msgs + [{
+        "role": "system",
+        "content": "This conversation is getting long. Consider summarizing."
+    }]
+)
+
+# Create adapter
+llm = ChatOpenAI(model="gpt-4")
+adapter = LangChainAdapter(rails, llm)
+
+# Rails processes messages before LangChain
+result = await adapter.run(messages)
+```
+
+### Custom Framework Adapter
+
+```python
+from rails.adapters import BaseAdapter
+
+class MyFrameworkAdapter(BaseAdapter):
+    def __init__(self, rails, agent):
+        super().__init__(rails)
+        self.agent = agent
+    
+    async def process_messages(self, messages, **kwargs):
+        # Apply Rails processing
+        processed = await self.rails.process(messages)
+        
+        # Convert to framework format
+        framework_messages = self.to_framework_format(processed)
+        
+        # Process with framework
+        result = await self.agent.process(framework_messages)
+        
+        # Update Rails state
+        await self.rails.store.increment("framework_calls")
+        
+        return result
+```
+
+## Advanced Patterns
+
+### Queue-Based Task Management
+
+```python
+from rails import Rails, current_rails, queue
+
+rails = Rails()
+
+# Tool adds tasks to queue
+def task_manager_tool(action, task=None):
+    rails = current_rails()
+    
+    if action == "add":
+        rails.store.push_queue_sync("tasks", task)
+    elif action == "complete":
+        completed = rails.store.pop_queue_sync("tasks")
+        rails.store.increment_sync("completed_tasks")
+        return completed
+    
+    return rails.store.get_queue_sync("tasks")
+
+# Rails monitors queue and provides guidance
+rails.add_rule(
+    condition=queue("tasks").length > 5,
+    action=lambda msgs: msgs + [{
+        "role": "system",
+        "content": "Multiple tasks pending. Focus on completion before adding more."
+    }]
+)
+
+rails.add_rule(
+    condition=queue("tasks").is_empty & (counter("idle_turns") > 2),
+    action=lambda msgs: msgs + [{
+        "role": "system", 
+        "content": "No pending tasks. Consider asking the user for next steps."
+    }]
+)
+```
+
+### Error Recovery Pattern
+
+```python
+from rails import Rails, current_rails, counter
+
+rails = Rails()
+
+# Tool reports errors
+def api_tool(endpoint):
+    rails = current_rails()
+    
+    try:
+        result = call_api(endpoint)
+        rails.store.reset_counter_sync("consecutive_errors")
+        return result
+    except Exception as e:
+        rails.store.increment_sync("errors")
+        rails.store.increment_sync("consecutive_errors")
+        rails.store.push_queue_sync("error_log", {
+            "endpoint": endpoint,
+            "error": str(e),
+            "timestamp": datetime.now()
+        })
+        
+        if rails.store.get_counter_sync("consecutive_errors") >= 3:
+            rails.store.set_sync("mode", "recovery")
+        
+        return None
+
+# Rails provides recovery guidance
+rails.add_rule(
+    condition=state("mode") == "recovery",
+    action=lambda msgs: msgs + [{
+        "role": "system",
+        "content": "In recovery mode. Try alternative approaches or ask for help."
+    }]
+)
+```
+
+### Progress Tracking
+
+```python
+from rails import Rails, current_rails
+
+rails = Rails()
+
+# Tools update progress
+def step_tool(step_name, status):
+    rails = current_rails()
+    
+    rails.store.set_sync(f"step_{step_name}", status)
+    
+    if status == "complete":
+        rails.store.increment_sync("completed_steps")
+        total = rails.store.get_counter_sync("total_steps", 10)
+        completed = rails.store.get_counter_sync("completed_steps")
+        
+        if completed == total:
+            rails.store.set_sync("workflow_status", "complete")
+    
+    return {"step": step_name, "status": status}
+
+# Rails provides progress updates
+rails.add_rule(
+    condition=counter("completed_steps") % 5 == 0,  # Every 5 steps
+    action=lambda msgs: msgs + [{
+        "role": "system",
+        "content": f"Good progress! {rails.store.get_counter_sync('completed_steps')} steps completed."
+    }]
+)
+```
+
+## Configuration
+
+### Store Configuration
+
+```python
+from rails import Rails, StoreConfig, QueueConfig
+
+config = StoreConfig(
+    persist_on_exit=True,
+    persistence_path="./rails_state.json",
+    emit_events=True,
+    max_event_history=1000,
+    default_queues={
+        "tasks": QueueConfig(max_size=100, fifo=True, auto_dedup=True),
+        "errors": QueueConfig(max_size=50, fifo=False),  # LIFO for errors
+    }
+)
+
+rails = Rails(store=Store(config=config))
+```
+
+### Middleware Stack
+
+```python
+from rails import Rails
+
+rails = Rails()
+
+# Add middleware for processing
+async def logging_middleware(messages, store):
+    await store.increment("middleware_calls")
+    print(f"Processing {len(messages)} messages")
+    return messages
+
+async def metric_middleware(messages, store):
+    start = time.time()
+    result = messages
+    duration = time.time() - start
+    await store.set("last_processing_time", duration)
+    return result
+
+rails.add_middleware(logging_middleware)
+rails.add_middleware(metric_middleware)
+
+# Process through middleware stack
+result = await rails.process_with_middleware(messages)
+```
+
+## Installation & Development
+
+### Installation
 
 ```bash
 # Core Rails package
@@ -485,15 +519,11 @@ pip install agent-rails
 pdm add agent-rails
 
 # With optional framework dependencies
-pip install agent-rails[adapters]  # includes langchain, smolagents
+pip install agent-rails[adapters]  # includes framework adapters
 pip install agent-rails[dev]       # includes development tools
-
-# Framework-specific installation
-pip install "agent-rails[adapters]" langchain
-pip install "agent-rails[adapters]" smolagents
 ```
 
-## Development
+### Development
 
 ```bash
 # Clone and set up development environment
@@ -515,13 +545,53 @@ pdm run build    # build wheel and sdist
 pdm run check    # verify built packages
 ```
 
+## API Reference
+
+### Rails
+
+- `Rails()` - Create Rails instance
+- `add_rule(condition, action, name=None, priority=0)` - Add orchestration rule
+- `process(messages)` - Process messages through rules
+- `process_with_middleware(messages)` - Process through middleware stack
+- `add_middleware(middleware)` - Add middleware function
+- `emit_metrics()` - Get metrics snapshot
+
+### Store
+
+- `increment(key, amount=1)` - Increment counter
+- `get_counter(key, default=0)` - Get counter value
+- `reset_counter(key)` - Reset counter to zero
+- `set(key, value)` - Set state value
+- `get(key, default=None)` - Get state value
+- `delete(key)` - Delete state key
+- `push_queue(queue, item)` - Add item to queue
+- `pop_queue(queue)` - Remove and return item from queue
+- `get_queue(queue)` - Get all queue items
+- `queue_length(queue)` - Get queue length
+- `clear_queue(queue)` - Clear all items from queue
+- `get_snapshot()` - Get complete state snapshot
+- `clear()` - Clear all state
+
+### Conditions
+
+- `counter(key)` - Create counter condition builder
+- `state(key)` - Create state condition builder  
+- `queue(name)` - Create queue condition builder
+- `AndCondition(*conditions)` - All conditions must be true
+- `OrCondition(*conditions)` - Any condition must be true
+- `NotCondition(condition)` - Negate condition
+- `AlwaysCondition()` - Always true
+- `NeverCondition()` - Always false
+
+### Injectors
+
+- `AppendInjector(message)` - Append message to end
+- `PrependInjector(message)` - Prepend message to start
+- `InsertInjector(message, index)` - Insert at index
+- `ReplaceInjector(messages)` - Replace all messages
+- `system(content, position="append")` - System message factory
+- `template(template, role=Role.SYSTEM)` - Template message factory
+
 ---
-
-## Examples & Community  
-
-- **Enhanced Example**: [`enhanced_example.py`](https://github.com/rizome-dev/rails/blob/main/examples/enhanced_example.py) - Full demonstration of all capabilities
-- **Adapter Examples**: [`adapter_example.py`](https://github.com/rizome-dev/rails/blob/main/examples/adapter_example.py) - Framework integration patterns  
-- **Documentation**: [GitHub Repository](https://github.com/rizome-dev/rails)
-- **Issues & Feature Requests**: [GitHub Issues](https://github.com/rizome-dev/rails/issues)
 
 **Built with ❤️ by [Rizome Labs, Inc.](https://rizome.dev)**

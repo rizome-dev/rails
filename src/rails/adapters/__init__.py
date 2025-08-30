@@ -42,18 +42,18 @@ SmolAgents Integration:
     result = await adapter.run("Create a data visualization")
 
 Custom Framework Integration:
-    from rails.adapters import BaseRailsAdapter
+    from rails.adapters import BaseAdapter
     
-    class MyFrameworkAdapter(BaseRailsAdapter):
+    class MyFrameworkAdapter(BaseAdapter):
         async def process_messages(self, messages, **kwargs):
             # Your framework-specific logic here
             return my_framework.process(messages)
     
-    adapter = MyFrameworkAdapter(rails)
-    result = await adapter.run(messages)
+    adapter = MyFrameworkAdapter(rails=rails)
+    result = await adapter.process_messages(messages)
 """
 
-from .base import BaseRailsAdapter, SimpleRailsAdapter, ProcessorAdapter, create_adapter
+from .base import BaseAdapter, GenericAdapter, MiddlewareAdapter, create_adapter
 
 # Import adapters with graceful degradation for optional dependencies
 try:
@@ -64,7 +64,11 @@ except ImportError:
     LANGCHAIN_AVAILABLE = False
 
 try:
-    from .smolagents import SmolAgentsAdapter, CodeAgentAdapter, create_smolagents_adapter
+    from .smolagents import (
+        CodeAgentAdapter,
+        SmolAgentsAdapter,
+        create_smolagents_adapter,
+    )
     from .smolagents import with_rails as smolagents_with_rails
     SMOLAGENTS_AVAILABLE = True
 except ImportError:
@@ -73,9 +77,9 @@ except ImportError:
 
 __all__ = [
     # Base adapter classes
-    "BaseRailsAdapter",
-    "SimpleRailsAdapter",
-    "ProcessorAdapter", 
+    "BaseAdapter",
+    "GenericAdapter",
+    "MiddlewareAdapter",
     "create_adapter",
 ]
 
@@ -90,7 +94,7 @@ if LANGCHAIN_AVAILABLE:
 if SMOLAGENTS_AVAILABLE:
     __all__.extend([
         "SmolAgentsAdapter",
-        "CodeAgentAdapter", 
+        "CodeAgentAdapter",
         "create_smolagents_adapter",
         "smolagents_with_rails",
     ])
@@ -110,16 +114,16 @@ def get_available_adapters() -> dict:
     adapters = {
         'base': {
             'available': True,
-            'adapter': BaseRailsAdapter,
+            'adapter': BaseAdapter,
             'description': 'Base adapter pattern for custom frameworks'
         },
-        'simple': {
+        'generic': {
             'available': True,
-            'adapter': SimpleRailsAdapter,
-            'description': 'Simple adapter for framework-agnostic usage'
+            'adapter': GenericAdapter,
+            'description': 'Generic adapter for framework-agnostic usage'
         }
     }
-    
+
     if LANGCHAIN_AVAILABLE:
         adapters['langchain'] = {
             'available': True,
@@ -133,7 +137,7 @@ def get_available_adapters() -> dict:
             'description': 'LangChain adapter (requires: pip install langchain-core)',
             'install_hint': 'pip install langchain-core'
         }
-    
+
     if SMOLAGENTS_AVAILABLE:
         adapters['smolagents'] = {
             'available': True,
@@ -147,24 +151,24 @@ def get_available_adapters() -> dict:
             'description': 'SmolAgents adapter (requires: pip install smolagents)',
             'install_hint': 'pip install smolagents'
         }
-    
+
     return adapters
 
 
 def print_adapter_status():
     """Print the status of all available adapters."""
     adapters = get_available_adapters()
-    
+
     print("Rails Framework Adapters:")
     print("=" * 50)
-    
+
     for name, info in adapters.items():
         status = "✓ Available" if info['available'] else "✗ Not Available"
         print(f"{name:12} {status:15} - {info['description']}")
-        
+
         if not info['available'] and 'install_hint' in info:
             print(f"{'':12} {'':15}   Install: {info['install_hint']}")
-    
+
     print()
 
 
@@ -194,14 +198,14 @@ def auto_adapter(framework_object, rails=None):
         adapter = auto_adapter(llm, rails)
     """
     obj_type = str(type(framework_object))
-    
+
     # LangChain detection
     if LANGCHAIN_AVAILABLE and 'langchain' in obj_type.lower():
         return LangChainAdapter(rails, framework_object)
-    
+
     # SmolAgents detection
     if SMOLAGENTS_AVAILABLE and ('smolagents' in obj_type.lower() or 'agent' in obj_type.lower()):
         return create_smolagents_adapter(framework_object, rails)
-    
-    # Default to simple adapter
-    return SimpleRailsAdapter(rails)
+
+    # Default to generic adapter
+    return GenericAdapter(rails=rails or Rails())

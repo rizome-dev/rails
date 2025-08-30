@@ -1,381 +1,250 @@
-"""Core Rails implementation for message injection and workflow execution based on conditions."""
+"""Core Rails implementation for lifecycle orchestration of AI agents."""
 
-from typing import List, Union, Callable, Optional, Any
-import asyncio
 import inspect
-from dataclasses import dataclass
-from contextlib import asynccontextmanager
+from collections.abc import Callable
+from contextvars import ContextVar
+from typing import Any, Optional
 
-from .types import Message, Condition, Injector
+from loguru import logger
+from pydantic import BaseModel, ConfigDict, Field
+
 from .store import Store
-from .injectors import AppendInjector
+from .types import Condition, Message, RailState
 
-
-@dataclass
-class InjectionRule:
-    """Represents a condition-injection rule pair."""
-    condition: Condition
-    message: Message
-    injector: Injector
-    name: Optional[str] = None
-
-
-@dataclass  
-class ExecutionRule:
-    """Represents a condition-execution rule pair for workflows."""
-    condition: Condition
-    workflow: Callable
-    args: tuple = ()
-    kwargs: dict = None
-    name: Optional[str] = None
-    background: bool = False
-    
-    def __post_init__(self):
-        if self.kwargs is None:
-            self.kwargs = {}
-
-
-# Global Rails registry for tool access
-_current_rails: Optional['Rails'] = None
+# Context variable for Rails instance access from tools
+rails_context: ContextVar[Optional['Rails']] = ContextVar('rails_context', default=None)
 
 
 def current_rails() -> 'Rails':
-    """
-    Get the current Rails instance for tool access.
+    """Get the current Rails instance from context.
     
-    This allows tools and workflows to easily access the Rails instance
-    they're running within, enabling them to manipulate state, add rules, etc.
+    This allows tools to access the Rails store for lifecycle orchestration.
     
     Returns:
         Current Rails instance
         
     Raises:
-        RuntimeError: If no Rails instance is currently active
+        RuntimeError: If no Rails instance is active
         
     Usage:
         from rails import current_rails
         
+        @tool
         def my_tool():
             rails = current_rails()
-            rails.store.increment('tool_calls')
-            rails.when(condition).inject(message)
+            await rails.store.push_queue("tasks", "new task")
     """
-    if _current_rails is None:
-        raise RuntimeError("No Rails instance is currently active. Use Rails within a context manager or adapter.")
-    return _current_rails
+    rails = rails_context.get()
+    if rails is None:
+        raise RuntimeError("No Rails instance is currently active. Ensure Rails is initialized.")
+    return rails
 
 
-def set_current_rails(rails: Optional['Rails']) -> None:
-    """Set the current Rails instance (internal use)."""
-    global _current_rails
-    _current_rails = rails
+class Rule(BaseModel):
+    """A lifecycle orchestration rule."""
+
+    condition: Condition
+    action: Callable  # Can be injector or workflow
+    name: str | None = None
+    priority: int = 0
+    enabled: bool = True
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    async def evaluate(self, store: Store) -> bool:
+        """Evaluate if this rule should trigger."""
+        if not self.enabled:
+            return False
+        return await self.condition.evaluate(store)
+
+    async def execute(self, context: Any) -> Any:
+        """Execute the rule action."""
+        if inspect.iscoroutinefunction(self.action):
+            return await self.action(context)
+        else:
+            return self.action(context)
 
 
-class Rails:
-    """Main Rails class for conditional message injection.
+class Rails(BaseModel):
+    """Lifecycle orchestration layer for AI agents.
     
-    Rails allows you to define conditions and automatically inject
-    specific messages when those conditions are met.
+    Rails provides a shared state store that both Rails conditions and agent tools
+    can access, enabling sophisticated feedback loops and lifecycle management.
     
     Usage:
-        rails = Rails()
-        rails.when(lambda s: s.get_counter_sync('turns') >= 3).inject(message)
-        modified_messages = await rails.check(messages)
+        async with Rails() as rails:
+            # Add lifecycle rules
+            rails.add_rule(
+                condition=QueueLength("tasks") > 5,
+                action=inject_message(system("Focus on high priority tasks"))
+            )
+            
+            # Process messages through Rails
+            messages = await rails.process(messages)
     """
-    
-    def __init__(self) -> None:
-        """Initialize Rails with empty rules and store."""
-        self.store = Store()
-        self._injection_rules: List[InjectionRule] = []
-        self._execution_rules: List[ExecutionRule] = []
-        self._current_condition: Optional[Condition] = None
-        self._lifecycle_functions: List[Union[str, Callable]] = []
-        self._lifecycle_manager = None
-        
-    def when(self, condition: Union[Condition, Callable[[Store], bool]]) -> 'Rails':
-        """Add a condition to check for message injection.
-        
-        Args:
-            condition: Condition callable or lambda that takes Store and returns bool
-            
-        Returns:
-            Self for method chaining
-            
-        Examples:
-            rails.when(lambda s: s.get_counter_sync('turns') >= 3)
-            rails.when(counter_condition)
-        """
-        # Store the condition for the next inject() call
-        self._current_condition = condition
-        return self
-        
-    def inject(self, message: Message, strategy: Union[str, Injector] = 'append', 
-               name: Optional[str] = None) -> 'Rails':
-        """Define message to inject when the last condition is met.
+
+    store: Store = Field(default_factory=Store)
+    rules: list[Rule] = Field(default_factory=list)
+    state: RailState = Field(default=RailState.INITIALIZED)
+    middleware_stack: list[Callable] = Field(default_factory=list)
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def add_rule(self, condition: Condition, action: Callable,
+                 name: str | None = None, priority: int = 0) -> None:
+        """Add a lifecycle orchestration rule.
         
         Args:
-            message: Message to inject (framework-agnostic dict)
-            strategy: Injection strategy ('append', 'prepend', 'replace_last') or Injector instance
-            name: Optional name for this rule
-            
-        Returns:
-            Self for method chaining
-            
-        Examples:
-            rails.when(condition).inject({"role": "system", "content": "Help the user"})
-            rails.when(condition).inject(message, strategy='prepend')
+            condition: Condition to evaluate
+            action: Action to take when condition is met
+            name: Optional rule name for debugging
+            priority: Rule priority (higher = evaluated first)
         """
-        if self._current_condition is None:
-            raise ValueError("inject() must be called after when(). Use when().inject() pattern.")
-            
-        # Convert string strategy to injector
-        if isinstance(strategy, str):
-            if strategy == 'append':
-                from .injectors import append
-                injector = append()
-            elif strategy == 'prepend':
-                from .injectors import prepend
-                injector = prepend()
-            elif strategy == 'replace_last':
-                from .injectors import replace_last
-                injector = replace_last()
-            else:
-                raise ValueError(f"Unknown strategy '{strategy}'. Use 'append', 'prepend', 'replace_last' or provide Injector instance.")
-        else:
-            injector = strategy
-            
-        # Create the rule
-        rule = InjectionRule(
-            condition=self._current_condition,
-            message=message,
-            injector=injector,
-            name=name
-        )
-        self._injection_rules.append(rule)
-        
-        # Clear current condition for next rule
-        self._current_condition = None
-        
-        return self
-        
-    def then(self, workflow: Callable, *args, background: bool = False, 
-             name: Optional[str] = None, **kwargs) -> 'Rails':
-        """Define workflow to execute when the last condition is met.
-        
-        Args:
-            workflow: Function or workflow to execute
-            *args: Positional arguments to pass to workflow
-            background: Whether to execute in background (non-blocking)
-            name: Optional name for this rule
-            **kwargs: Keyword arguments to pass to workflow
-            
-        Returns:
-            Self for method chaining
-            
-        Examples:
-            rails.when(condition).then(my_workflow)
-            rails.when(condition).then(lambda r: r.store.set('mode', 'debug'))
-            rails.when(condition).then(start_background_task, background=True)
-        """
-        if self._current_condition is None:
-            raise ValueError("then() must be called after when(). Use when().then() pattern.")
-            
-        # Create the execution rule
-        rule = ExecutionRule(
-            condition=self._current_condition,
-            workflow=workflow,
-            args=args,
-            kwargs=kwargs,
+        rule = Rule(
+            condition=condition,
+            action=action,
             name=name,
-            background=background
+            priority=priority
         )
-        self._execution_rules.append(rule)
-        
-        # Clear current condition for next rule
-        self._current_condition = None
-        
-        return self
-        
-    def with_lifecycle(self, *lifecycle_funcs: Union[str, Callable]) -> 'Rails':
-        """Add lifecycle functions to be used with this Rails instance.
-        
-        Lifecycle functions provide composable setup/cleanup logic that can be
-        mixed and matched based on the needs of your workflow.
+        self.rules.append(rule)
+        # Sort by priority
+        self.rules.sort(key=lambda r: r.priority, reverse=True)
+
+    async def process(self, messages: list[Message]) -> list[Message]:
+        """Process messages through Rails lifecycle orchestration.
         
         Args:
-            *lifecycle_funcs: Lifecycle function names or callable functions
+            messages: Current message chain
             
         Returns:
-            Self for method chaining
-            
-        Examples:
-            rails.with_lifecycle('database', 'queue').when(condition).inject(message)
-            rails.with_lifecycle(my_lifecycle_func).when(condition).then(workflow)
-            
-            @lifecycle_function
-            async def my_setup(rails):
-                # setup code
-                yield
-                # cleanup code
+            Modified message chain with any injections
         """
-        self._lifecycle_functions.extend(lifecycle_funcs)
-        return self
-        
-    async def check(self, messages: List[Message]) -> List[Message]:
-        """Check conditions and inject messages or execute workflows if met.
-        
-        Args:
-            messages: Current message chain to potentially modify
-            
-        Returns:
-            Modified message chain with injections applied
-        """
+        self.state = RailState.EVALUATING
         result = messages.copy()
-        
-        # Handle injection rules
-        for rule in self._injection_rules:
-            try:
-                if rule.condition(self.store):
-                    result = rule.injector.inject(result, rule.message)
-            except Exception as e:
-                # Log error but continue with other rules
-                # In production, you might want to use proper logging
-                print(f"Error in injection condition {rule.name or 'unnamed'}: {e}")
-                continue
-        
-        # Handle execution rules  
-        for rule in self._execution_rules:
-            try:
-                if rule.condition(self.store):
-                    await self._execute_workflow(rule)
-            except Exception as e:
-                # Log error but continue with other rules
-                print(f"Error in execution condition {rule.name or 'unnamed'}: {e}")
-                continue
-                
-        return result
-        
-    async def _execute_workflow(self, rule: ExecutionRule) -> None:
-        """Execute a workflow from an execution rule."""
+
+        # Set context if not already set
+        current = rails_context.get()
+        if current is None:
+            token = rails_context.set(self)
+        else:
+            token = None
+
         try:
-            if rule.background:
-                # Execute in background (fire and forget)
-                asyncio.create_task(self._run_workflow(rule))
-            else:
-                # Execute synchronously
-                await self._run_workflow(rule)
+            # Evaluate all rules
+            for rule in self.rules:
+                if await rule.evaluate(self.store):
+                    logger.debug(f"Rule '{rule.name or 'unnamed'}' triggered")
+                    self.state = RailState.INJECTING
+
+                    # Execute the action - it may modify messages or perform side effects
+                    action_result = await rule.execute(result)
+                    if action_result is not None:
+                        # Action returned modified messages
+                        result = action_result
+
+            self.state = RailState.COMPLETED
+            return result
+
         except Exception as e:
-            print(f"Error executing workflow {rule.name or 'unnamed'}: {e}")
-            
-    async def _run_workflow(self, rule: ExecutionRule) -> Any:
-        """Run a workflow with proper argument handling."""
-        workflow = rule.workflow
-        
-        # Pass rails instance as first argument if workflow accepts it
-        if inspect.signature(workflow).parameters:
-            first_param = next(iter(inspect.signature(workflow).parameters.values()))
-            if first_param.name in ['rails', 'r'] or first_param.annotation == 'Rails':
-                args = (self,) + rule.args
-            else:
-                args = rule.args
-        else:
-            args = rule.args
-        
-        if inspect.iscoroutinefunction(workflow):
-            return await workflow(*args, **rule.kwargs)
-        else:
-            return workflow(*args, **rule.kwargs)
-        
-    async def __aenter__(self) -> 'Rails':
-        """Context manager entry for lifecycle management."""
-        # Set this instance as the current Rails for global access
-        set_current_rails(self)
-        
-        # Initialize lifecycle manager if we have lifecycle functions
-        if self._lifecycle_functions:
-            from .lifecycle import LifecycleManager
-            self._lifecycle_manager = LifecycleManager(self)
-        
-        return self
-        
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Context manager exit for cleanup."""
-        try:
-            # Clear the global reference
-            set_current_rails(None)
-            
-            # Cleanup lifecycle manager
-            if self._lifecycle_manager:
-                self._lifecycle_manager.clear_context()
-                
-            # Clear store
-            await self.store.clear()
+            self.state = RailState.ERROR
+            logger.error(f"Error in Rails processing: {e}")
+            raise
         finally:
-            # Ensure global reference is cleared even if cleanup fails
-            set_current_rails(None)
+            # Reset context if we set it
+            if token is not None:
+                rails_context.reset(token)
+
+
+    async def __aenter__(self) -> 'Rails':
+        """Context manager entry - set up Rails context."""
+        # Set this instance in context for tool access
+        token = rails_context.set(self)
+        self._context_token = token
+
+        # Restore store state if configured
+        await self.store.restore()
+
+        logger.info("Rails lifecycle orchestration initialized")
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit - clean up Rails context."""
+        try:
+            # Persist store state if configured
+            await self.store.persist()
+
+            # Reset context
+            if hasattr(self, '_context_token'):
+                rails_context.reset(self._context_token)
+
+            logger.info("Rails lifecycle orchestration completed")
+        except Exception as e:
+            logger.error(f"Error during Rails cleanup: {e}")
+
+    def add_middleware(self, middleware: Callable) -> None:
+        """Add middleware to the processing stack.
         
+        Args:
+            middleware: Async callable that processes messages
+        """
+        self.middleware_stack.append(middleware)
+
+    async def process_with_middleware(self, messages: list[Message]) -> list[Message]:
+        """Process messages through middleware stack then Rails rules.
+        
+        Args:
+            messages: Input messages
+            
+        Returns:
+            Processed messages
+        """
+        result = messages
+
+        # Process through middleware stack
+        for middleware in self.middleware_stack:
+            if inspect.iscoroutinefunction(middleware):
+                result = await middleware(result, self.store)
+            else:
+                result = middleware(result, self.store)
+
+        # Then process through Rails rules
+        return await self.process(result)
+
     def clear_rules(self) -> None:
-        """Clear all injection and execution rules."""
-        self._injection_rules.clear()
-        self._execution_rules.clear()
-        self._current_condition = None
-        
-    def get_injection_rules(self) -> List[InjectionRule]:
-        """Get list of current injection rules."""
-        return self._injection_rules.copy()
-        
-    def get_execution_rules(self) -> List[ExecutionRule]:
-        """Get list of current execution rules."""
-        return self._execution_rules.copy()
-        
-    def rule_count(self) -> int:
-        """Get total number of active rules."""
-        return len(self._injection_rules) + len(self._execution_rules)
-        
-    def injection_rule_count(self) -> int:
-        """Get number of active injection rules."""
-        return len(self._injection_rules)
-        
-    def execution_rule_count(self) -> int:
-        """Get number of active execution rules."""  
-        return len(self._execution_rules)
-        
-    # Convenience methods for common patterns
-    def on_counter(self, counter_key: str, threshold: int, message: Message, 
-                   comparison: str = ">=") -> 'Rails':
-        """Convenience method for counter-based injection.
-        
-        Args:
-            counter_key: Counter to check
-            threshold: Threshold value
-            message: Message to inject
-            comparison: Comparison operator
-            
-        Returns:
-            Self for chaining
-        """
-        from .conditions import CounterCondition
-        condition = CounterCondition(counter_key, threshold, comparison)
-        return self.when(condition).inject(message)
-        
-    def on_state(self, state_key: str, expected_value, message: Message) -> 'Rails':
-        """Convenience method for state-based injection.
-        
-        Args:
-            state_key: State key to check
-            expected_value: Expected state value
-            message: Message to inject
-            
-        Returns:
-            Self for chaining
-        """
-        from .conditions import StateCondition
-        condition = StateCondition(state_key, expected_value)
-        return self.when(condition).inject(message)
-        
+        """Clear all rules."""
+        self.rules.clear()
+
+    def enable_rule(self, name: str) -> None:
+        """Enable a rule by name."""
+        for rule in self.rules:
+            if rule.name == name:
+                rule.enabled = True
+                break
+
+    def disable_rule(self, name: str) -> None:
+        """Disable a rule by name."""
+        for rule in self.rules:
+            if rule.name == name:
+                rule.enabled = False
+                break
+
+    def get_active_rules(self) -> list[Rule]:
+        """Get all enabled rules."""
+        return [r for r in self.rules if r.enabled]
+
+    async def emit_metrics(self) -> dict[str, Any]:
+        """Get Rails metrics for observability."""
+        snapshot = await self.store.get_snapshot()
+        return {
+            "state": self.state.value,
+            "total_rules": len(self.rules),
+            "active_rules": len(self.get_active_rules()),
+            "store_snapshot": snapshot,
+            "middleware_count": len(self.middleware_stack)
+        }
+
     def __str__(self) -> str:
-        total_rules = len(self._injection_rules) + len(self._execution_rules)
-        return f"Rails({total_rules} rules: {len(self._injection_rules)} inject, {len(self._execution_rules)} execute)"
-        
+        return f"Rails({len(self.rules)} rules, state={self.state.value})"
+
     def __repr__(self) -> str:
-        return f"Rails(injection_rules={len(self._injection_rules)}, execution_rules={len(self._execution_rules)}, store_keys={len(self.store._state) + len(self.store._counters)}, lifecycle_funcs={len(self._lifecycle_functions)})"
+        return f"Rails(rules={len(self.rules)}, middleware={len(self.middleware_stack)}, state={self.state})"

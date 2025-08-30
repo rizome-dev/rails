@@ -1,93 +1,160 @@
-"""Rails - Conditional message injection and workflow execution for AI agents."""
+"""Rails - Lifecycle orchestration for AI agents."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-from .core import Rails, InjectionRule, ExecutionRule, current_rails
-from .store import Store
-from .types import Message, Condition, Injector
+# Core
+# Conditions
 from .conditions import (
-    LambdaCondition, CounterCondition, StateCondition,
-    AndCondition, OrCondition, NotCondition,
-    counter_at_least, counter_equals, state_equals, state_in
+    AlwaysCondition,
+    # Composite conditions
+    AndCondition,
+    ComparisonOperator,
+    # Base classes
+    ConditionBase,
+    # Concrete conditions
+    CounterCondition,
+    LambdaCondition,
+    NeverCondition,
+    NotCondition,
+    OrCondition,
+    QueueCondition,
+    StateCondition,
+    # Builder functions
+    counter,
+    queue,
+    state,
 )
+from .core import Rails, Rule, current_rails, rails_context
+
+# Injectors
 from .injectors import (
-    AppendInjector, PrependInjector, InsertInjector, ReplaceInjector,
-    ConditionalInjector, append, prepend, insert_at, replace_last, 
-    replace_all, replace_where
+    # Concrete injectors
+    AppendInjector,
+    ConditionalInjector,
+    # Base classes
+    InjectorBase,
+    InsertInjector,
+    PrependInjector,
+    ReplaceInjector,
+    SystemInjector,
+    TemplateInjector,
+    # Factory functions
+    append_message,
+    prepend_message,
+    system,
+    template,
 )
-from .lifecycle import (
-    lifecycle_function, LifecycleFunction, LifecycleRegistry,
-    with_lifecycle_functions, LifecycleManager,
-    counter_tracker_lifecycle, error_handler_lifecycle
+from .store import QueueConfig, Store, StoreConfig
+
+# Types
+from .types import (
+    Condition,
+    FrameworkAdapter,
+    Injector,
+    Message,
+    RailState,
+    Role,
+    StateEvent,
 )
-from .execution import (
-    ExecutionTask, BackgroundExecutor, get_background_executor,
-    execute_background_workflow, background_execution_context,
-    WorkflowOrchestrator
+
+# Lifecycle (if still present)
+try:
+    from .lifecycle import (
+        LifecycleFunction,
+        LifecycleManager,
+        LifecycleRegistry,
+        lifecycle_function,
+        with_lifecycle_functions,
+    )
+except ImportError:
+    # Lifecycle module may be optional
+    pass
+
+# Execution (if still present)
+try:
+    from .execution import (
+        BackgroundExecutor,
+        ExecutionTask,
+        WorkflowOrchestrator,
+        background_execution_context,
+        execute_background_workflow,
+        get_background_executor,
+    )
+except ImportError:
+    # Execution module may be optional
+    pass
+
+# Adapters
+from . import adapters
+from .adapters.base import (
+    BaseAdapter,
+    GenericAdapter,
+    MiddlewareAdapter,
+    create_adapter,
+    create_middleware_stack,
+    rails_middleware,
 )
 
 __all__ = [
-    # Core classes
+    # Version
+    "__version__",
+
+    # Core
     "Rails",
-    "Store",
-    "InjectionRule",
-    "ExecutionRule",
+    "Rule",
     "current_rails",
-    
-    # Type definitions
+    "rails_context",
+
+    # Store
+    "Store",
+    "StoreConfig",
+    "QueueConfig",
+
+    # Types
     "Message",
-    "Condition", 
+    "Role",
+    "StateEvent",
+    "RailState",
+    "Condition",
     "Injector",
-    
-    # Condition classes
-    "LambdaCondition",
-    "CounterCondition", 
+    "FrameworkAdapter",
+
+    # Conditions
+    "ConditionBase",
+    "ComparisonOperator",
+    "CounterCondition",
     "StateCondition",
+    "QueueCondition",
+    "LambdaCondition",
     "AndCondition",
     "OrCondition",
     "NotCondition",
-    
-    # Condition helpers
-    "counter_at_least",
-    "counter_equals",
-    "state_equals", 
-    "state_in",
-    
-    # Injector classes
+    "AlwaysCondition",
+    "NeverCondition",
+    "counter",
+    "state",
+    "queue",
+
+    # Injectors
+    "InjectorBase",
     "AppendInjector",
-    "PrependInjector", 
+    "PrependInjector",
     "InsertInjector",
     "ReplaceInjector",
     "ConditionalInjector",
-    
-    # Injector helpers
-    "append",
-    "prepend",
-    "insert_at",
-    "replace_last",
-    "replace_all",
-    "replace_where",
-    
-    # Lifecycle management
-    "lifecycle_function",
-    "LifecycleFunction",
-    "LifecycleRegistry", 
-    "with_lifecycle_functions",
-    "LifecycleManager",
-    "counter_tracker_lifecycle",
-    "error_handler_lifecycle",
-    
-    # Background execution
-    "ExecutionTask",
-    "BackgroundExecutor",
-    "get_background_executor",
-    "execute_background_workflow",
-    "background_execution_context",
-    "WorkflowOrchestrator",
-    
-    # Adapters (note: specific adapters available based on installed dependencies)
-    "adapters",
-]
+    "SystemInjector",
+    "TemplateInjector",
+    "append_message",
+    "prepend_message",
+    "system",
+    "template",
 
-# Import adapters submodule
-from . import adapters
+    # Adapters
+    "adapters",
+    "BaseAdapter",
+    "MiddlewareAdapter",
+    "GenericAdapter",
+    "create_adapter",
+    "create_middleware_stack",
+    "rails_middleware",
+]
