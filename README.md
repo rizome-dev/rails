@@ -139,6 +139,8 @@ async with Rails() as rails:
     rails.store.increment_sync("tool_calls")
     rails.store.set_sync("last_tool", "calculator")
     value = rails.store.get_sync("last_tool")
+    count = rails.store.get_counter_sync("tool_calls")  # Get counter synchronously
+    rails.store.push_queue_sync("tasks", "new_task")     # Push to queue synchronously
 ```
 
 ### 3. Tool Integration with `current_rails()`
@@ -544,6 +546,7 @@ pdm run check    # verify built packages
 
 ### Store
 
+**Async Methods:**
 - `increment(key, amount=1)` - Increment counter
 - `get_counter(key, default=0)` - Get counter value
 - `reset_counter(key)` - Reset counter to zero
@@ -557,6 +560,13 @@ pdm run check    # verify built packages
 - `clear_queue(queue)` - Clear all items from queue
 - `get_snapshot()` - Get complete state snapshot
 - `clear()` - Clear all state
+
+**Synchronous Methods (for use in tools):**
+- `increment_sync(key, amount=1)` - Increment counter synchronously
+- `get_counter_sync(key, default=0)` - Get counter value synchronously
+- `get_sync(key, default=None)` - Get state value synchronously
+- `set_sync(key, value)` - Set state value synchronously
+- `push_queue_sync(queue, item)` - Add item to queue synchronously
 
 ### Conditions
 
