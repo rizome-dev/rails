@@ -98,18 +98,15 @@ from .adapters.base import (
 __all__ = [
     # Version
     "__version__",
-
     # Core
     "Rails",
     "Rule",
     "current_rails",
     "rails_context",
-
     # Store
     "Store",
     "StoreConfig",
     "QueueConfig",
-
     # Types
     "Message",
     "Role",
@@ -118,7 +115,6 @@ __all__ = [
     "Condition",
     "Injector",
     "FrameworkAdapter",
-
     # Conditions
     "ConditionBase",
     "ComparisonOperator",
@@ -134,7 +130,6 @@ __all__ = [
     "counter",
     "state",
     "queue",
-
     # Injectors
     "InjectorBase",
     "AppendInjector",
@@ -148,7 +143,6 @@ __all__ = [
     "prepend_message",
     "system",
     "template",
-
     # Adapters
     "adapters",
     "BaseAdapter",

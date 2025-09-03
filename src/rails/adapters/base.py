@@ -33,10 +33,10 @@ class BaseAdapter(BaseModel, ABC):
     @abstractmethod
     async def to_rails_messages(self, framework_messages: list[Any]) -> list[Message]:
         """Convert framework messages to Rails format.
-        
+
         Args:
             framework_messages: Messages in framework format
-            
+
         Returns:
             Messages in Rails format
         """
@@ -45,10 +45,10 @@ class BaseAdapter(BaseModel, ABC):
     @abstractmethod
     async def from_rails_messages(self, rails_messages: list[Message]) -> list[Any]:
         """Convert Rails messages to framework format.
-        
+
         Args:
             rails_messages: Messages in Rails format
-            
+
         Returns:
             Messages in framework format
         """
@@ -56,7 +56,7 @@ class BaseAdapter(BaseModel, ABC):
 
     async def register_store_access(self, store: Store) -> None:
         """Make Rails store accessible to framework tools.
-        
+
         Args:
             store: Rails store instance
         """
@@ -67,10 +67,10 @@ class BaseAdapter(BaseModel, ABC):
 
     async def process_messages(self, messages: list[Any]) -> list[Any]:
         """Process messages through Rails.
-        
+
         Args:
             messages: Framework messages
-            
+
         Returns:
             Processed messages
         """
@@ -83,17 +83,19 @@ class BaseAdapter(BaseModel, ABC):
         # Update counters
         await self.rails.store.increment("turns")
         if len(processed) > len(rails_messages):
-            await self.rails.store.increment("injections", len(processed) - len(rails_messages))
+            await self.rails.store.increment(
+                "injections", len(processed) - len(rails_messages)
+            )
 
         # Convert back to framework format
         return await self.from_rails_messages(processed)
 
     async def wrap(self, agent: Any) -> Any:
         """Wrap an agent with Rails integration.
-        
+
         Args:
             agent: Agent to wrap
-            
+
         Returns:
             Wrapped agent
         """
@@ -119,10 +121,10 @@ class MiddlewareAdapter(BaseAdapter):
 
     async def __call__(self, messages: list[Any]) -> list[Any]:
         """Process messages as middleware.
-        
+
         Args:
             messages: Input messages
-            
+
         Returns:
             Processed messages
         """
@@ -131,7 +133,7 @@ class MiddlewareAdapter(BaseAdapter):
 
         # Pass to next processor if available
         if self.next_processor:
-            if hasattr(self.next_processor, 'process'):
+            if hasattr(self.next_processor, "process"):
                 processed = await self.next_processor.process(processed)
             elif callable(self.next_processor):
                 if inspect.iscoroutinefunction(self.next_processor):
@@ -141,12 +143,12 @@ class MiddlewareAdapter(BaseAdapter):
 
         return processed
 
-    def chain(self, processor: MessageProcessor) -> 'MiddlewareAdapter':
+    def chain(self, processor: MessageProcessor) -> "MiddlewareAdapter":
         """Chain another processor after this middleware.
-        
+
         Args:
             processor: Next processor in chain
-            
+
         Returns:
             Self for chaining
         """
@@ -171,18 +173,17 @@ class GenericAdapter(BaseAdapter):
         rails_messages = []
         for msg in framework_messages:
             if isinstance(msg, dict):
-                rails_messages.append(Message(
-                    role=Role(msg.get("role", "user")),
-                    content=msg.get("content", "")
-                ))
+                rails_messages.append(
+                    Message(
+                        role=Role(msg.get("role", "user")),
+                        content=msg.get("content", ""),
+                    )
+                )
             elif isinstance(msg, Message):
                 rails_messages.append(msg)
             else:
                 # Try to extract content
-                rails_messages.append(Message(
-                    role=Role.USER,
-                    content=str(msg)
-                ))
+                rails_messages.append(Message(role=Role.USER, content=str(msg)))
 
         return rails_messages
 
@@ -194,32 +195,36 @@ class GenericAdapter(BaseAdapter):
 
 def create_middleware_stack(*middlewares) -> Callable:
     """Create a middleware stack from multiple processors.
-    
+
     Args:
         *middlewares: Middleware processors to chain
-        
+
     Returns:
         Combined middleware function
     """
     if not middlewares:
+
         async def identity(messages):
             return messages
+
         return identity
 
     # Chain middlewares
     stack = middlewares[0]
     for mw in middlewares[1:]:
-        if hasattr(stack, 'chain'):
+        if hasattr(stack, "chain"):
             stack.chain(mw)
         else:
             # Wrap in a lambda to chain
             prev_stack = stack
+
             async def chained(messages, s=prev_stack, m=mw):
                 result = await s(messages)
                 if inspect.iscoroutinefunction(m):
                     return await m(result)
                 else:
                     return m(result)
+
             stack = chained
 
     return stack
@@ -227,14 +232,17 @@ def create_middleware_stack(*middlewares) -> Callable:
 
 def rails_middleware(rails: Rails) -> Callable:
     """Create a middleware function from Rails instance.
-    
+
     Args:
         rails: Rails instance
-        
+
     Returns:
         Middleware function
     """
-    async def middleware(messages: list[Any], next_handler: Callable | None = None) -> list[Any]:
+
+    async def middleware(
+        messages: list[Any], next_handler: Callable | None = None
+    ) -> list[Any]:
         # Set Rails context
         token = rails_context.set(rails)
 
@@ -265,22 +273,23 @@ def rails_middleware(rails: Rails) -> Callable:
     return middleware
 
 
-def create_adapter(processor: Callable | None = None,
-                  rails: Rails | None = None) -> GenericAdapter:
+def create_adapter(
+    processor: Callable | None = None, rails: Rails | None = None
+) -> GenericAdapter:
     """Factory function to create a generic Rails adapter.
-    
+
     Args:
         processor: Function to process messages
         rails: Rails instance to use
-        
+
     Returns:
         Configured GenericAdapter
-        
+
     Example:
         def my_processor(messages):
             # Process messages here
             return processed_messages
-            
+
         adapter = create_adapter(processor=my_processor)
         result = await adapter.process_messages(messages)
     """

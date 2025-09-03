@@ -32,13 +32,13 @@ class ExecutionTask:
     status: str = "pending"  # pending, running, completed, failed
     result: Any = None
     error: Exception | None = None
-    rails_instance: Optional['Rails'] = None
+    rails_instance: Optional["Rails"] = None
 
 
 class BackgroundExecutor:
     """
     Background execution manager using AnyIO task groups.
-    
+
     This class provides robust background execution capabilities with:
     - Concurrent task execution with limits
     - Task lifecycle tracking
@@ -60,7 +60,9 @@ class BackgroundExecutor:
             return
 
         self._executor_active = True
-        logger.info(f"Started background executor with {self.max_concurrent} concurrent task limit")
+        logger.info(
+            f"Started background executor with {self.max_concurrent} concurrent task limit"
+        )
 
     async def stop(self):
         """Stop the background executor and wait for tasks to complete."""
@@ -71,7 +73,9 @@ class BackgroundExecutor:
 
         # Wait for active tasks to complete (with timeout)
         if self.active_tasks:
-            logger.info(f"Waiting for {len(self.active_tasks)} active tasks to complete...")
+            logger.info(
+                f"Waiting for {len(self.active_tasks)} active tasks to complete..."
+            )
 
             # Give tasks 30 seconds to complete gracefully
             timeout_seconds = 30
@@ -81,17 +85,19 @@ class BackgroundExecutor:
                 await asyncio.sleep(0.1)
 
             if self.active_tasks:
-                logger.warning(f"Force stopping {len(self.active_tasks)} remaining tasks after {timeout_seconds}s timeout")
+                logger.warning(
+                    f"Force stopping {len(self.active_tasks)} remaining tasks after {timeout_seconds}s timeout"
+                )
 
         logger.info("Background executor stopped")
 
     async def submit_task(self, task: ExecutionTask) -> str:
         """
         Submit a task for background execution.
-        
+
         Args:
             task: ExecutionTask to execute
-            
+
         Returns:
             Task ID for tracking
         """
@@ -118,6 +124,7 @@ class BackgroundExecutor:
                 # Set Rails context if available
                 if task.rails_instance:
                     from .core import set_current_rails
+
                     set_current_rails(task.rails_instance)
 
                 try:
@@ -131,7 +138,9 @@ class BackgroundExecutor:
                     task.status = "completed"
                     task.completed_at = time.time()
 
-                    logger.debug(f"Completed task {task.task_id} in {task.completed_at - task.started_at:.2f}s")
+                    logger.debug(
+                        f"Completed task {task.task_id} in {task.completed_at - task.started_at:.2f}s"
+                    )
 
                 except Exception as e:
                     task.error = e
@@ -144,6 +153,7 @@ class BackgroundExecutor:
                     # Clean up Rails context
                     if task.rails_instance:
                         from .core import set_current_rails
+
                         set_current_rails(None)
 
         finally:
@@ -156,7 +166,7 @@ class BackgroundExecutor:
                 if len(self.completed_tasks) > 100:
                     oldest_tasks = sorted(
                         self.completed_tasks.items(),
-                        key=lambda x: x[1].completed_at or 0
+                        key=lambda x: x[1].completed_at or 0,
                     )
                     for task_id, _ in oldest_tasks[:-100]:
                         self.completed_tasks.pop(task_id, None)
@@ -173,14 +183,16 @@ class BackgroundExecutor:
 
         return None
 
-    async def wait_for_task(self, task_id: str, timeout: float = 60.0) -> tuple[bool, Any, Exception | None]:
+    async def wait_for_task(
+        self, task_id: str, timeout: float = 60.0
+    ) -> tuple[bool, Any, Exception | None]:
         """
         Wait for a task to complete.
-        
+
         Args:
             task_id: Task ID to wait for
             timeout: Maximum time to wait in seconds
-            
+
         Returns:
             Tuple of (success, result, error)
         """
@@ -210,7 +222,9 @@ class BackgroundExecutor:
                 "created_at": task.created_at,
                 "started_at": task.started_at,
                 "age_seconds": time.time() - task.created_at,
-                "running_seconds": (time.time() - task.started_at) if task.started_at else 0,
+                "running_seconds": (
+                    (time.time() - task.started_at) if task.started_at else 0
+                ),
             }
             for task_id, task in self.active_tasks.items()
         }
@@ -236,18 +250,19 @@ def get_background_executor() -> BackgroundExecutor:
     return _background_executor
 
 
-async def execute_background_workflow(workflow: Callable, *args, rails_instance=None,
-                                    task_id: str | None = None, **kwargs) -> str:
+async def execute_background_workflow(
+    workflow: Callable, *args, rails_instance=None, task_id: str | None = None, **kwargs
+) -> str:
     """
     Convenience function to execute a workflow in the background.
-    
+
     Args:
         workflow: Workflow function to execute
         *args: Arguments to pass to workflow
         rails_instance: Rails instance for context (optional)
         task_id: Custom task ID (auto-generated if None)
         **kwargs: Keyword arguments to pass to workflow
-        
+
     Returns:
         Task ID for tracking
     """
@@ -267,7 +282,7 @@ async def execute_background_workflow(workflow: Callable, *args, rails_instance=
         workflow=workflow,
         args=args,
         kwargs=kwargs,
-        rails_instance=rails_instance
+        rails_instance=rails_instance,
     )
 
     return await executor.submit_task(task)
@@ -277,12 +292,12 @@ async def execute_background_workflow(workflow: Callable, *args, rails_instance=
 async def background_execution_context(max_concurrent: int = 10):
     """
     Context manager for background execution.
-    
+
     This ensures proper startup and cleanup of the background executor.
-    
+
     Args:
         max_concurrent: Maximum number of concurrent tasks
-        
+
     Usage:
         async with background_execution_context() as executor:
             task_id = await execute_background_workflow(my_workflow)
@@ -300,7 +315,7 @@ async def background_execution_context(max_concurrent: int = 10):
 class WorkflowOrchestrator:
     """
     High-level orchestrator for complex workflow patterns.
-    
+
     This class provides patterns for common workflow orchestration needs,
     like conditional pipelines, parallel execution, and error recovery.
     """
@@ -322,13 +337,15 @@ class WorkflowOrchestrator:
             await self.executor.stop()
             self._active = False
 
-    async def execute_conditional_pipeline(self, conditions_and_workflows: list[tuple[Callable, Callable]]) -> dict[str, Any]:
+    async def execute_conditional_pipeline(
+        self, conditions_and_workflows: list[tuple[Callable, Callable]]
+    ) -> dict[str, Any]:
         """
         Execute workflows conditionally in sequence.
-        
+
         Args:
             conditions_and_workflows: List of (condition_func, workflow_func) tuples
-            
+
         Returns:
             Results dictionary with task IDs and outcomes
         """
@@ -341,9 +358,7 @@ class WorkflowOrchestrator:
                     task_id = f"pipeline_{i}_{uuid.uuid4().hex[:6]}"
 
                     task = ExecutionTask(
-                        task_id=task_id,
-                        workflow=workflow,
-                        rails_instance=self.rails
+                        task_id=task_id, workflow=workflow, rails_instance=self.rails
                     )
 
                     await self.executor.submit_task(task)
@@ -353,7 +368,7 @@ class WorkflowOrchestrator:
                         "success": success,
                         "result": result,
                         "error": error,
-                        "step": i
+                        "step": i,
                     }
 
                     # If this step failed and it's critical, stop pipeline
@@ -370,14 +385,16 @@ class WorkflowOrchestrator:
 
         return results
 
-    async def execute_parallel_workflows(self, workflows: list[Callable], wait_all: bool = True) -> dict[str, Any]:
+    async def execute_parallel_workflows(
+        self, workflows: list[Callable], wait_all: bool = True
+    ) -> dict[str, Any]:
         """
         Execute multiple workflows in parallel.
-        
+
         Args:
             workflows: List of workflow functions
             wait_all: Whether to wait for all workflows to complete
-            
+
         Returns:
             Results dictionary with task IDs and outcomes
         """
@@ -390,9 +407,7 @@ class WorkflowOrchestrator:
             task_id = f"parallel_{i}_{uuid.uuid4().hex[:6]}"
 
             task = ExecutionTask(
-                task_id=task_id,
-                workflow=workflow,
-                rails_instance=self.rails
+                task_id=task_id, workflow=workflow, rails_instance=self.rails
             )
 
             await self.executor.submit_task(task)
@@ -403,11 +418,17 @@ class WorkflowOrchestrator:
         for task_id in task_ids:
             if wait_all:
                 success, result, error = await self.executor.wait_for_task(task_id)
-                results[task_id] = {"success": success, "result": result, "error": error}
+                results[task_id] = {
+                    "success": success,
+                    "result": result,
+                    "error": error,
+                }
             else:
                 # Just get current status without waiting
                 task_status = await self.executor.get_task_status(task_id)
-                results[task_id] = {"status": task_status.status if task_status else "unknown"}
+                results[task_id] = {
+                    "status": task_status.status if task_status else "unknown"
+                }
 
         return results
 

@@ -1,6 +1,5 @@
 """Tests for Rails lifecycle orchestration."""
 
-
 import pytest
 
 from rails import (
@@ -45,16 +44,13 @@ class TestRails:
 
         # Create an append injector
         injector = AppendInjector(
-            message=Message(
-                role=Role.SYSTEM,
-                content="Conversation limit reached"
-            )
+            message=Message(role=Role.SYSTEM, content="Conversation limit reached")
         )
 
         rails.add_rule(
             condition=counter("turns") >= 3,
             action=injector.inject,
-            name="limit_conversation"
+            name="limit_conversation",
         )
 
         # Set counter to trigger condition
@@ -62,7 +58,7 @@ class TestRails:
 
         messages = [
             Message(role=Role.USER, content="Hello"),
-            Message(role=Role.ASSISTANT, content="Hi there!")
+            Message(role=Role.ASSISTANT, content="Hi there!"),
         ]
 
         result = await rails.process(messages)
@@ -79,24 +75,18 @@ class TestRails:
         rails.add_rule(
             condition=state("mode") == "debug",
             action=AppendInjector(
-                message=Message(
-                    role=Role.SYSTEM,
-                    content="Debug mode active"
-                )
+                message=Message(role=Role.SYSTEM, content="Debug mode active")
             ).inject,
-            priority=10
+            priority=10,
         )
 
         # Low priority rule
         rails.add_rule(
             condition=counter("errors") >= 1,
             action=AppendInjector(
-                message=Message(
-                    role=Role.SYSTEM,
-                    content="Errors detected"
-                )
+                message=Message(role=Role.SYSTEM, content="Errors detected")
             ).inject,
-            priority=1
+            priority=1,
         )
 
         await rails.store.set("mode", "debug")
@@ -121,9 +111,9 @@ class TestRails:
             action=AppendInjector(
                 message=Message(
                     role=Role.SYSTEM,
-                    content="Too many pending tasks. Focus on completion."
+                    content="Too many pending tasks. Focus on completion.",
                 )
-            ).inject
+            ).inject,
         )
 
         # Push tasks to queue
@@ -156,7 +146,7 @@ class TestRails:
         rails.add_rule(
             condition=counter("failures") > 3,
             action=cleanup_workflow,
-            name="cleanup_on_failures"
+            name="cleanup_on_failures",
         )
 
         # Set context for current_rails() to work
@@ -181,11 +171,8 @@ class TestRails:
             rails.add_rule(
                 condition=counter("calls") >= 1,
                 action=AppendInjector(
-                    message=Message(
-                        role=Role.SYSTEM,
-                        content="First call"
-                    )
-                ).inject
+                    message=Message(role=Role.SYSTEM, content="First call")
+                ).inject,
             )
 
             await rails.store.increment("calls")
@@ -228,16 +215,16 @@ class TestRails:
             action=ReplaceInjector(
                 messages=[
                     Message(role=Role.SYSTEM, content="Conversation reset"),
-                    Message(role=Role.ASSISTANT, content="How can I help you?")
+                    Message(role=Role.ASSISTANT, content="How can I help you?"),
                 ]
-            ).inject
+            ).inject,
         )
 
         await rails.store.set("reset", True)
 
         messages = [
             Message(role=Role.USER, content="Old message 1"),
-            Message(role=Role.ASSISTANT, content="Old response")
+            Message(role=Role.ASSISTANT, content="Old response"),
         ]
 
         result = await rails.process(messages)
@@ -254,17 +241,11 @@ class TestRails:
         injector = ConditionalInjector(
             condition=counter("errors") > 2,
             injector=AppendInjector(
-                message=Message(
-                    role=Role.SYSTEM,
-                    content="Multiple errors detected"
-                )
-            )
+                message=Message(role=Role.SYSTEM, content="Multiple errors detected")
+            ),
         )
 
-        rails.add_rule(
-            condition=AlwaysCondition(),
-            action=injector.inject
-        )
+        rails.add_rule(condition=AlwaysCondition(), action=injector.inject)
 
         # Should not inject initially
         messages = [Message(role=Role.USER, content="test")]
@@ -284,7 +265,7 @@ class TestRails:
 
         rails.add_rule(
             condition=counter("warnings") >= 3,
-            action=system("Please be more careful with your inputs")
+            action=system("Please be more careful with your inputs"),
         )
 
         await rails.store.increment("warnings", 3)
@@ -303,7 +284,7 @@ class TestRails:
 
         rails.add_rule(
             condition=state("user_name").exists,
-            action=template("Hello {user_name}, how can I help you today?")
+            action=template("Hello {user_name}, how can I help you today?"),
         )
 
         await rails.store.set("user_name", "Alice")
@@ -407,23 +388,14 @@ class TestConditions:
         await store.set("mode", "test")
 
         # Test AND
-        and_cond = AndCondition(
-            counter("count") >= 5,
-            state("mode") == "test"
-        )
+        and_cond = AndCondition(counter("count") >= 5, state("mode") == "test")
         assert await and_cond.evaluate(store)
 
-        and_cond = AndCondition(
-            counter("count") >= 10,
-            state("mode") == "test"
-        )
+        and_cond = AndCondition(counter("count") >= 10, state("mode") == "test")
         assert not await and_cond.evaluate(store)
 
         # Test OR
-        or_cond = OrCondition(
-            counter("count") >= 10,
-            state("mode") == "test"
-        )
+        or_cond = OrCondition(counter("count") >= 10, state("mode") == "test")
         assert await or_cond.evaluate(store)
 
         # Test NOT
@@ -467,9 +439,7 @@ class TestInjectors:
     @pytest.mark.asyncio
     async def test_append_injector(self):
         """Test appending messages."""
-        injector = AppendInjector(
-            message=Message(role=Role.SYSTEM, content="Appended")
-        )
+        injector = AppendInjector(message=Message(role=Role.SYSTEM, content="Appended"))
 
         messages = [Message(role=Role.USER, content="Hello")]
         result = await injector.inject(messages)
@@ -494,13 +464,12 @@ class TestInjectors:
     async def test_insert_injector(self):
         """Test inserting messages at specific index."""
         injector = InsertInjector(
-            message=Message(role=Role.SYSTEM, content="Inserted"),
-            index=1
+            message=Message(role=Role.SYSTEM, content="Inserted"), index=1
         )
 
         messages = [
             Message(role=Role.USER, content="First"),
-            Message(role=Role.ASSISTANT, content="Last")
+            Message(role=Role.ASSISTANT, content="Last"),
         ]
         result = await injector.inject(messages)
 
@@ -513,14 +482,14 @@ class TestInjectors:
         injector = ReplaceInjector(
             messages=[
                 Message(role=Role.SYSTEM, content="New 1"),
-                Message(role=Role.ASSISTANT, content="New 2")
+                Message(role=Role.ASSISTANT, content="New 2"),
             ]
         )
 
         messages = [
             Message(role=Role.USER, content="Old 1"),
             Message(role=Role.ASSISTANT, content="Old 2"),
-            Message(role=Role.USER, content="Old 3")
+            Message(role=Role.USER, content="Old 3"),
         ]
         result = await injector.inject(messages)
 
@@ -599,7 +568,7 @@ class TestStore:
             default_queues={
                 "limited": QueueConfig(max_size=2),
                 "dedup": QueueConfig(auto_dedup=True),
-                "lifo": QueueConfig(fifo=False)
+                "lifo": QueueConfig(fifo=False),
             }
         )
         store = Store(config=config)
@@ -689,10 +658,9 @@ class TestMiddleware:
         # Add injection middleware
         async def injection_middleware(messages, store):
             if await store.get_counter("inject_header") > 0:
-                messages.insert(0, Message(
-                    role=Role.SYSTEM,
-                    content="Middleware header"
-                ))
+                messages.insert(
+                    0, Message(role=Role.SYSTEM, content="Middleware header")
+                )
             return messages
 
         rails.add_middleware(logging_middleware)
@@ -719,7 +687,7 @@ class TestRuleManagement:
         rails.add_rule(
             condition=AlwaysCondition(),
             action=append_message(Message(role=Role.SYSTEM, content="Always")),
-            name="always_rule"
+            name="always_rule",
         )
 
         # Rule should be active
@@ -741,16 +709,8 @@ class TestRuleManagement:
         """Test clearing all rules."""
         rails = Rails()
 
-        rails.add_rule(
-            condition=AlwaysCondition(),
-            action=lambda m: m,
-            name="rule1"
-        )
-        rails.add_rule(
-            condition=NeverCondition(),
-            action=lambda m: m,
-            name="rule2"
-        )
+        rails.add_rule(condition=AlwaysCondition(), action=lambda m: m, name="rule1")
+        rails.add_rule(condition=NeverCondition(), action=lambda m: m, name="rule2")
 
         assert len(rails.rules) == 2
 
@@ -761,16 +721,8 @@ class TestRuleManagement:
         """Test getting active rules."""
         rails = Rails()
 
-        rails.add_rule(
-            condition=AlwaysCondition(),
-            action=lambda m: m,
-            name="rule1"
-        )
-        rails.add_rule(
-            condition=NeverCondition(),
-            action=lambda m: m,
-            name="rule2"
-        )
+        rails.add_rule(condition=AlwaysCondition(), action=lambda m: m, name="rule1")
+        rails.add_rule(condition=NeverCondition(), action=lambda m: m, name="rule2")
 
         assert len(rails.get_active_rules()) == 2
 
@@ -786,11 +738,7 @@ class TestMetrics:
         """Test metrics emission."""
         rails = Rails()
 
-        rails.add_rule(
-            condition=AlwaysCondition(),
-            action=lambda m: m,
-            name="rule1"
-        )
+        rails.add_rule(condition=AlwaysCondition(), action=lambda m: m, name="rule1")
         rails.add_middleware(lambda m, s: m)
 
         await rails.store.increment("counter", 5)

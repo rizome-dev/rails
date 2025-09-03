@@ -1,5 +1,5 @@
 <!-- You have been trained on a corpus that was cutoff at sometime before the current date. You must constantly ground yourself in the current date, to avoid utilizing outdated or wrong information. You have access to a powerful Web Search tool, as well as others, which can assist in grounding yourself in the current SOTA & Usage Guidelines for the task at hand. -->
-<!-- Current Date: 2025-09-03 04:30:25 UTC -->
+<!-- Current Date: 2025-09-03 16:52:15 UTC -->
 
 # RIZOME.md
 
@@ -106,27 +106,34 @@ pdm run check         # Verify built packages with twine
 
 **Adapters (`src/rails/adapters/`)**
 - `BaseAdapter`: Abstract base for framework integration  
-- `LangChainAdapter`: Integration with LangChain
-- `SmolAgentsAdapter`: Integration with SmolAgents (HuggingFace)
-- Generic `create_adapter()` for any processing function
-- `MiddlewareAdapter` and `GenericAdapter` for custom integrations
+- `LangChainAdapter`: Transparent wrapper for LangChain runnables (chains, models)
+- `SmolAgentsAdapter`: Transparent wrapper for SmolAgents agents  
+- `CodeAgentAdapter`: Specialized wrapper for SmolAgents CodeAgent with enhanced tracking
+- `GenericAdapter` and `MiddlewareAdapter` for custom integrations
+- `create_adapter()` factory function for any processing function
+- `auto_adapter()` automatically detects framework and creates appropriate adapter
 
 #### Key Design Patterns
 
 1. **Fluent Interface**: `rails.when(condition).inject(message)` chains
-2. **Context Variables**: `current_rails()` for global access within tools
-3. **Generator-based Lifecycle**: Using `yield` for setup/teardown phases
-4. **Strategy Pattern**: Different injection and execution strategies
-5. **Decorator Pattern**: `@lifecycle_function` for modular components
+2. **Transparent Wrappers**: Adapters intercept methods via `__getattr__` while preserving original API
+3. **Context Variables**: `current_rails()` for global access within tools
+4. **Thread Pool Execution**: Sync methods run async Rails code in separate threads to avoid event loop conflicts
+5. **Generator-based Lifecycle**: Using `yield` for setup/teardown phases
+6. **Strategy Pattern**: Different injection and execution strategies
+7. **Decorator Pattern**: `@lifecycle_function` for modular components and `@with_rails` for adapters
 
 ### Testing Guidelines
 
 - All new features require corresponding tests in `tests/`
 - Use `pytest.mark.asyncio` for async test functions
-- Mock external dependencies and API calls
+- Mock external dependencies and API calls with proper patching
 - Test both success and failure conditions
 - Verify thread safety for Store operations
 - Test lifecycle management with context managers
+- For adapter tests: Use `@patch` to mock `FRAMEWORK_AVAILABLE` flags
+- Mock framework classes to avoid requiring actual framework installations
+- Test wrapper behavior: method interception, context management, metrics tracking
 
 ### Common Development Tasks
 
@@ -143,11 +150,14 @@ pdm run check         # Verify built packages with twine
 4. Add integration test showing usage
 
 #### Creating a Framework Adapter
+Modern adapters use transparent wrapping:
 1. Extend `BaseAdapter` in `adapters/base.py`
-2. Implement `process_messages()` for framework-specific logic  
-3. Override `update_rails_state()` if needed
-4. Add example in `examples/modern_adapters.py` or create new example file
-5. For official adapters (LangChain, SmolAgents), add to `src/rails/adapters/`
+2. Implement `wrap()` method that returns a wrapper class
+3. Wrapper class uses `__getattr__` to proxy all methods to original object
+4. Intercept key methods (e.g., `invoke`, `run`) to inject Rails processing
+5. Use thread pools to run async Rails code in sync methods
+6. Add example in `examples/adapters_demo.py` or create new example file
+7. For official adapters (LangChain, SmolAgents), add to `src/rails/adapters/`
 
 #### Adding a Lifecycle Function
 1. Use `@lifecycle_function` decorator
@@ -207,6 +217,33 @@ async with Rails() as rails:
     processed = await rails.process(messages)
 ```
 
+**Transparent Adapter Usage**
+```python
+# LangChain Example
+from rails.adapters import LangChainAdapter
+from langchain_openai import ChatOpenAI
+
+adapter = LangChainAdapter(rails)
+llm = ChatOpenAI()
+
+async with rails:
+    wrapped_llm = await adapter.wrap(llm)
+    # Use exactly like the original - Rails happens automatically!
+    result = wrapped_llm.invoke([{"role": "user", "content": "Hello!"}])
+
+# SmolAgents Example  
+from rails.adapters import SmolAgentsAdapter
+from smolagents import CodeAgent
+
+adapter = SmolAgentsAdapter(rails)
+agent = CodeAgent(tools=[], model="gpt-4")
+
+async with rails:
+    wrapped_agent = await adapter.wrap(agent)
+    # Use exactly like the original!
+    result = wrapped_agent.run("Create a function")
+```
+
 **Tool Integration Pattern**
 ```python
 def my_tool(data):
@@ -251,7 +288,9 @@ async def test_my_feature():
 - Run `pdm run test` to verify changes don't break existing functionality
 - Use `pdm run format` before committing code changes
 - Examples in `examples/` show real usage patterns - check them for guidance
-- The `modern_` prefixed examples show current best practices
+- The `adapters_demo.py` example shows current best practices for transparent wrappers
+- Adapters use thread pool execution to avoid event loop conflicts in tests
+- Test naming: `test_adapters_native.py` contains adapter integration tests
 
 ### QWEN
 Qwen-specific instructions

@@ -13,6 +13,7 @@ from .store import Store
 
 class ComparisonOperator(str, Enum):
     """Supported comparison operators."""
+
     EQ = "=="
     NE = "!="
     GT = ">"
@@ -51,7 +52,7 @@ class CounterCondition(ConditionBase):
     threshold: int
     operator: ComparisonOperator = ComparisonOperator.GE
 
-    @field_validator('counter_key')
+    @field_validator("counter_key")
     @classmethod
     def validate_key(cls, v: str) -> str:
         if not v or not v.strip():
@@ -75,7 +76,9 @@ class CounterCondition(ConditionBase):
         elif self.operator == ComparisonOperator.LE:
             return current <= self.threshold
         else:
-            logger.warning(f"Unsupported operator {self.operator} for counter condition")
+            logger.warning(
+                f"Unsupported operator {self.operator} for counter condition"
+            )
             return False
 
     def __str__(self) -> str:
@@ -104,7 +107,9 @@ class StateCondition(ConditionBase):
         elif self.operator == ComparisonOperator.CONTAINS:
             return self.expected_value in current if current else False
         elif self.operator == ComparisonOperator.STARTS_WITH:
-            return str(current).startswith(str(self.expected_value)) if current else False
+            return (
+                str(current).startswith(str(self.expected_value)) if current else False
+            )
         elif self.operator == ComparisonOperator.ENDS_WITH:
             return str(current).endswith(str(self.expected_value)) if current else False
         else:
@@ -138,7 +143,7 @@ class QueueCondition(ConditionBase):
     expected_value: Any | None = None
     operator: ComparisonOperator = ComparisonOperator.GE
 
-    @field_validator('queue_name')
+    @field_validator("queue_name")
     @classmethod
     def validate_queue_name(cls, v: str) -> str:
         if not v or not v.strip():
@@ -204,6 +209,7 @@ class LambdaCondition(ConditionBase):
     async def evaluate(self, store: Store) -> bool:
         """Evaluate custom function."""
         import inspect
+
         if inspect.iscoroutinefunction(self.func):
             return await self.func(store)
         else:
@@ -220,7 +226,7 @@ class AndCondition(ConditionBase):
 
     def __init__(self, *conditions, **kwargs):
         """Allow passing conditions as positional arguments."""
-        if conditions and not kwargs.get('conditions'):
+        if conditions and not kwargs.get("conditions"):
             super().__init__(conditions=list(conditions))
         else:
             super().__init__(**kwargs)
@@ -243,7 +249,7 @@ class OrCondition(ConditionBase):
 
     def __init__(self, *conditions, **kwargs):
         """Allow passing conditions as positional arguments."""
-        if conditions and not kwargs.get('conditions'):
+        if conditions and not kwargs.get("conditions"):
             super().__init__(conditions=list(conditions))
         else:
             super().__init__(**kwargs)
@@ -266,7 +272,7 @@ class NotCondition(ConditionBase):
 
     def __init__(self, condition: ConditionBase = None, **kwargs):
         """Allow passing condition as positional argument."""
-        if condition is not None and 'condition' not in kwargs:
+        if condition is not None and "condition" not in kwargs:
             super().__init__(condition=condition)
         else:
             super().__init__(**kwargs)
@@ -302,17 +308,17 @@ class NeverCondition(ConditionBase):
 
 
 # Factory functions for common conditions
-def counter(key: str) -> 'CounterBuilder':
+def counter(key: str) -> "CounterBuilder":
     """Start building a counter condition."""
     return CounterBuilder(key)
 
 
-def state(key: str) -> 'StateBuilder':
+def state(key: str) -> "StateBuilder":
     """Start building a state condition."""
     return StateBuilder(key)
 
 
-def queue(name: str) -> 'QueueBuilder':
+def queue(name: str) -> "QueueBuilder":
     """Start building a queue condition."""
     return QueueBuilder(name)
 
@@ -324,22 +330,34 @@ class CounterBuilder:
         self.key = key
 
     def __eq__(self, value: int) -> CounterCondition:
-        return CounterCondition(counter_key=self.key, threshold=value, operator=ComparisonOperator.EQ)
+        return CounterCondition(
+            counter_key=self.key, threshold=value, operator=ComparisonOperator.EQ
+        )
 
     def __ne__(self, value: int) -> CounterCondition:
-        return CounterCondition(counter_key=self.key, threshold=value, operator=ComparisonOperator.NE)
+        return CounterCondition(
+            counter_key=self.key, threshold=value, operator=ComparisonOperator.NE
+        )
 
     def __gt__(self, value: int) -> CounterCondition:
-        return CounterCondition(counter_key=self.key, threshold=value, operator=ComparisonOperator.GT)
+        return CounterCondition(
+            counter_key=self.key, threshold=value, operator=ComparisonOperator.GT
+        )
 
     def __ge__(self, value: int) -> CounterCondition:
-        return CounterCondition(counter_key=self.key, threshold=value, operator=ComparisonOperator.GE)
+        return CounterCondition(
+            counter_key=self.key, threshold=value, operator=ComparisonOperator.GE
+        )
 
     def __lt__(self, value: int) -> CounterCondition:
-        return CounterCondition(counter_key=self.key, threshold=value, operator=ComparisonOperator.LT)
+        return CounterCondition(
+            counter_key=self.key, threshold=value, operator=ComparisonOperator.LT
+        )
 
     def __le__(self, value: int) -> CounterCondition:
-        return CounterCondition(counter_key=self.key, threshold=value, operator=ComparisonOperator.LE)
+        return CounterCondition(
+            counter_key=self.key, threshold=value, operator=ComparisonOperator.LE
+        )
 
 
 class StateBuilder:
@@ -349,22 +367,36 @@ class StateBuilder:
         self.key = key
 
     def __eq__(self, value: Any) -> StateCondition:
-        return StateCondition(state_key=self.key, expected_value=value, operator=ComparisonOperator.EQ)
+        return StateCondition(
+            state_key=self.key, expected_value=value, operator=ComparisonOperator.EQ
+        )
 
     def __ne__(self, value: Any) -> StateCondition:
-        return StateCondition(state_key=self.key, expected_value=value, operator=ComparisonOperator.NE)
+        return StateCondition(
+            state_key=self.key, expected_value=value, operator=ComparisonOperator.NE
+        )
 
     def in_(self, values: Any) -> StateCondition:
-        return StateCondition(state_key=self.key, expected_value=values, operator=ComparisonOperator.IN)
+        return StateCondition(
+            state_key=self.key, expected_value=values, operator=ComparisonOperator.IN
+        )
 
     def not_in(self, values: Any) -> StateCondition:
-        return StateCondition(state_key=self.key, expected_value=values, operator=ComparisonOperator.NOT_IN)
+        return StateCondition(
+            state_key=self.key,
+            expected_value=values,
+            operator=ComparisonOperator.NOT_IN,
+        )
 
     def contains(self, value: Any) -> StateCondition:
-        return StateCondition(state_key=self.key, expected_value=value, operator=ComparisonOperator.CONTAINS)
+        return StateCondition(
+            state_key=self.key,
+            expected_value=value,
+            operator=ComparisonOperator.CONTAINS,
+        )
 
     @property
-    def exists(self) -> 'StateExistsCondition':
+    def exists(self) -> "StateExistsCondition":
         """Check if state key exists."""
         return StateExistsCondition(state_key=self.key)
 
@@ -385,14 +417,18 @@ class QueueBuilder:
         return QueueCondition(queue_name=self.name, check_type="empty")
 
     @property
-    def length(self) -> 'QueueLengthBuilder':
+    def length(self) -> "QueueLengthBuilder":
         return QueueLengthBuilder(self.name)
 
     def contains(self, value: Any) -> QueueCondition:
-        return QueueCondition(queue_name=self.name, check_type="contains", expected_value=value)
+        return QueueCondition(
+            queue_name=self.name, check_type="contains", expected_value=value
+        )
 
     def head_equals(self, value: Any) -> QueueCondition:
-        return QueueCondition(queue_name=self.name, check_type="head", expected_value=value)
+        return QueueCondition(
+            queue_name=self.name, check_type="head", expected_value=value
+        )
 
 
 class QueueLengthBuilder:
@@ -402,16 +438,41 @@ class QueueLengthBuilder:
         self.name = name
 
     def __eq__(self, value: int) -> QueueCondition:
-        return QueueCondition(queue_name=self.name, check_type="length", threshold=value, operator=ComparisonOperator.EQ)
+        return QueueCondition(
+            queue_name=self.name,
+            check_type="length",
+            threshold=value,
+            operator=ComparisonOperator.EQ,
+        )
 
     def __gt__(self, value: int) -> QueueCondition:
-        return QueueCondition(queue_name=self.name, check_type="length", threshold=value, operator=ComparisonOperator.GT)
+        return QueueCondition(
+            queue_name=self.name,
+            check_type="length",
+            threshold=value,
+            operator=ComparisonOperator.GT,
+        )
 
     def __ge__(self, value: int) -> QueueCondition:
-        return QueueCondition(queue_name=self.name, check_type="length", threshold=value, operator=ComparisonOperator.GE)
+        return QueueCondition(
+            queue_name=self.name,
+            check_type="length",
+            threshold=value,
+            operator=ComparisonOperator.GE,
+        )
 
     def __lt__(self, value: int) -> QueueCondition:
-        return QueueCondition(queue_name=self.name, check_type="length", threshold=value, operator=ComparisonOperator.LT)
+        return QueueCondition(
+            queue_name=self.name,
+            check_type="length",
+            threshold=value,
+            operator=ComparisonOperator.LT,
+        )
 
     def __le__(self, value: int) -> QueueCondition:
-        return QueueCondition(queue_name=self.name, check_type="length", threshold=value, operator=ComparisonOperator.LE)
+        return QueueCondition(
+            queue_name=self.name,
+            check_type="length",
+            threshold=value,
+            operator=ComparisonOperator.LE,
+        )

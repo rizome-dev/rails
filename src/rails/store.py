@@ -16,7 +16,7 @@ from .types import QueueConfig, StateEvent, StoreConfig
 
 class Store(BaseModel):
     """Thread-safe shared state store for Rails and agent tools.
-    
+
     This store is the heart of Rails - it provides a shared state space
     that both Rails conditions and agent tools can access, enabling
     sophisticated feedback loops and lifecycle orchestration.
@@ -44,14 +44,16 @@ class Store(BaseModel):
             self._queues[queue_name] = deque(maxlen=maxlen)
 
     # Counter operations
-    async def increment(self, key: str, amount: int = 1, triggered_by: str | None = None) -> int:
+    async def increment(
+        self, key: str, amount: int = 1, triggered_by: str | None = None
+    ) -> int:
         """Increment a counter and emit event.
-        
+
         Args:
             key: Counter key to increment
             amount: Amount to increment by
             triggered_by: Tool or condition that triggered this
-            
+
         Returns:
             New counter value
         """
@@ -61,13 +63,15 @@ class Store(BaseModel):
             new_value = self._counters[key]
 
             if self.config.emit_events:
-                await self._emit_event(StateEvent(
-                    event_type="counter_increment",
-                    key=key,
-                    value=new_value,
-                    previous_value=old_value,
-                    triggered_by=triggered_by
-                ))
+                await self._emit_event(
+                    StateEvent(
+                        event_type="counter_increment",
+                        key=key,
+                        value=new_value,
+                        previous_value=old_value,
+                        triggered_by=triggered_by,
+                    )
+                )
 
             return new_value
 
@@ -83,13 +87,15 @@ class Store(BaseModel):
             self._counters[key] = 0
 
             if self.config.emit_events:
-                await self._emit_event(StateEvent(
-                    event_type="counter_increment",
-                    key=key,
-                    value=0,
-                    previous_value=old_value,
-                    triggered_by=triggered_by
-                ))
+                await self._emit_event(
+                    StateEvent(
+                        event_type="counter_increment",
+                        key=key,
+                        value=0,
+                        previous_value=old_value,
+                        triggered_by=triggered_by,
+                    )
+                )
 
     # State operations
     async def set(self, key: str, value: Any, triggered_by: str | None = None) -> None:
@@ -99,13 +105,15 @@ class Store(BaseModel):
             self._state[key] = value
 
             if self.config.emit_events:
-                await self._emit_event(StateEvent(
-                    event_type="state_set",
-                    key=key,
-                    value=value,
-                    previous_value=old_value,
-                    triggered_by=triggered_by
-                ))
+                await self._emit_event(
+                    StateEvent(
+                        event_type="state_set",
+                        key=key,
+                        value=value,
+                        previous_value=old_value,
+                        triggered_by=triggered_by,
+                    )
+                )
 
     async def get(self, key: str, default: Any = None) -> Any:
         """Get state value."""
@@ -120,18 +128,22 @@ class Store(BaseModel):
                 del self._state[key]
 
                 if self.config.emit_events:
-                    await self._emit_event(StateEvent(
-                        event_type="state_set",
-                        key=key,
-                        value=None,
-                        previous_value=old_value,
-                        triggered_by=triggered_by
-                    ))
+                    await self._emit_event(
+                        StateEvent(
+                            event_type="state_set",
+                            key=key,
+                            value=None,
+                            previous_value=old_value,
+                            triggered_by=triggered_by,
+                        )
+                    )
                 return True
             return False
 
     # Queue operations - Critical for lifecycle management
-    async def push_queue(self, queue: str, item: Any, triggered_by: str | None = None) -> None:
+    async def push_queue(
+        self, queue: str, item: Any, triggered_by: str | None = None
+    ) -> None:
         """Push item to queue (FIFO by default)."""
         async with self._lock:
             if queue not in self._queues:
@@ -148,14 +160,18 @@ class Store(BaseModel):
             q.append(item)
 
             if self.config.emit_events:
-                await self._emit_event(StateEvent(
-                    event_type="queue_push",
-                    key=queue,
-                    value=item,
-                    triggered_by=triggered_by
-                ))
+                await self._emit_event(
+                    StateEvent(
+                        event_type="queue_push",
+                        key=queue,
+                        value=item,
+                        triggered_by=triggered_by,
+                    )
+                )
 
-    async def pop_queue(self, queue: str, triggered_by: str | None = None) -> Any | None:
+    async def pop_queue(
+        self, queue: str, triggered_by: str | None = None
+    ) -> Any | None:
         """Pop item from queue."""
         async with self._lock:
             if queue not in self._queues or not self._queues[queue]:
@@ -167,12 +183,14 @@ class Store(BaseModel):
             item = q.popleft() if queue_config.fifo else q.pop()
 
             if self.config.emit_events:
-                await self._emit_event(StateEvent(
-                    event_type="queue_pop",
-                    key=queue,
-                    value=item,
-                    triggered_by=triggered_by
-                ))
+                await self._emit_event(
+                    StateEvent(
+                        event_type="queue_pop",
+                        key=queue,
+                        value=item,
+                        triggered_by=triggered_by,
+                    )
+                )
 
             return item
 
@@ -197,12 +215,14 @@ class Store(BaseModel):
                 self._queues[queue].clear()
 
                 if self.config.emit_events:
-                    await self._emit_event(StateEvent(
-                        event_type="queue_pop",
-                        key=queue,
-                        value=None,
-                        triggered_by=triggered_by
-                    ))
+                    await self._emit_event(
+                        StateEvent(
+                            event_type="queue_pop",
+                            key=queue,
+                            value=None,
+                            triggered_by=triggered_by,
+                        )
+                    )
 
     # Event operations
     async def _emit_event(self, event: StateEvent) -> None:
@@ -265,7 +285,7 @@ class Store(BaseModel):
                 "counters": dict(self._counters),
                 "state": self._state,
                 "queues": {k: list(v) for k, v in self._queues.items()},
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
 
         path.write_text(json.dumps(state, default=str, indent=2))
@@ -284,7 +304,9 @@ class Store(BaseModel):
             self._counters = defaultdict(int, state.get("counters", {}))
             self._state = state.get("state", {})
             self._queues = {
-                k: deque(v, maxlen=self.config.default_queues.get(k, QueueConfig()).max_size)
+                k: deque(
+                    v, maxlen=self.config.default_queues.get(k, QueueConfig()).max_size
+                )
                 for k, v in state.get("queues", {}).items()
             }
 
@@ -296,7 +318,9 @@ class Store(BaseModel):
                 "counters": dict(self._counters),
                 "state": dict(self._state),
                 "queues": {k: list(v) for k, v in self._queues.items()},
-                "events": [e.model_dump() for e in self._events][-100:]  # Last 100 events
+                "events": [e.model_dump() for e in self._events][
+                    -100:
+                ],  # Last 100 events
             }
 
     async def clear(self) -> None:
@@ -311,6 +335,7 @@ class Store(BaseModel):
     def increment_sync(self, key: str, amount: int = 1) -> int:
         """Synchronous counter increment for use in tools."""
         import asyncio
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -318,27 +343,59 @@ class Store(BaseModel):
             return asyncio.run(self.increment(key, amount))
         else:
             # We're in an event loop, schedule the coroutine
-            future = asyncio.ensure_future(self.increment(key, amount))
-            return asyncio.run_coroutine_threadsafe(future, loop).result()
+            future = asyncio.run_coroutine_threadsafe(self.increment(key, amount), loop)
+            return future.result()
+
+    def get_counter_sync(self, key: str, default: int = 0) -> int:
+        """Synchronous counter getter for use in tools and conditions."""
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop, create one
+            return asyncio.run(self.get_counter(key, default))
+        else:
+            # We're in an event loop, schedule the coroutine
+            future = asyncio.run_coroutine_threadsafe(
+                self.get_counter(key, default), loop
+            )
+            return future.result()
 
     def get_sync(self, key: str, default: Any = None) -> Any:
         """Synchronous state getter for use in tools."""
         import asyncio
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self.get(key, default))
         else:
-            future = asyncio.ensure_future(self.get(key, default))
-            return asyncio.run_coroutine_threadsafe(future, loop).result()
+            future = asyncio.run_coroutine_threadsafe(self.get(key, default), loop)
+            return future.result()
 
     def set_sync(self, key: str, value: Any) -> None:
         """Synchronous state setter for use in tools."""
         import asyncio
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             asyncio.run(self.set(key, value))
         else:
-            future = asyncio.ensure_future(self.set(key, value))
-            asyncio.run_coroutine_threadsafe(future, loop).result()
+            future = asyncio.run_coroutine_threadsafe(self.set(key, value), loop)
+            future.result()
+
+    def push_queue_sync(self, queue: str, item: Any) -> None:
+        """Synchronous queue push for use in tools."""
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self.push_queue(queue, item))
+        else:
+            future = asyncio.run_coroutine_threadsafe(
+                self.push_queue(queue, item), loop
+            )
+            future.result()

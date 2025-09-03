@@ -20,10 +20,10 @@ class InjectorBase(BaseModel, ABC):
     @abstractmethod
     async def inject(self, messages: list[Message]) -> list[Message]:
         """Inject message(s) into the conversation.
-        
+
         Args:
             messages: Current message chain
-            
+
         Returns:
             Modified message chain
         """
@@ -92,6 +92,7 @@ class ConditionalInjector(InjectorBase):
     async def inject(self, messages: list[Message]) -> list[Message]:
         """Conditionally inject based on Store state."""
         from .core import current_rails
+
         try:
             rails = current_rails()
             store = rails.store
@@ -125,11 +126,15 @@ class TemplateInjector(InjectorBase):
         """Inject templated message."""
         # Get context from Rails store
         from .core import current_rails
+
         try:
             rails = current_rails()
             context_vars = await rails.store.get_snapshot()
             # Merge state for template
-            template_context = {**context_vars.get('state', {}), **context_vars.get('counters', {})}
+            template_context = {
+                **context_vars.get("state", {}),
+                **context_vars.get("counters", {}),
+            }
         except RuntimeError:
             template_context = {}
 
@@ -170,6 +175,7 @@ def prepend_message(message: Message) -> Callable:
 
 def system(content: str, position: str = "append") -> Callable:
     """Factory for system messages."""
+
     async def action(messages: list[Message]) -> list[Message]:
         msg = Message(role=Role.SYSTEM, content=content, injected_by_rails=True)
         result = messages.copy()
@@ -184,7 +190,7 @@ def system(content: str, position: str = "append") -> Callable:
 
 def template(tpl: str, role: Role = Role.SYSTEM) -> Callable:
     """Factory for templated messages.
-    
+
     Usage:
         rails.add_rule(
             condition=state("user_name").exists,

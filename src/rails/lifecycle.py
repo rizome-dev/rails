@@ -35,14 +35,16 @@ class LifecycleRegistry:
         self._functions: dict[str, LifecycleFunction] = {}
         self._active_contexts: dict[str, Any] = {}
 
-    def register(self, name: str, func: Callable, priority: int = 0,
-                 dependencies: list[str] = None) -> None:
+    def register(
+        self,
+        name: str,
+        func: Callable,
+        priority: int = 0,
+        dependencies: list[str] = None,
+    ) -> None:
         """Register a lifecycle function."""
         lifecycle_func = LifecycleFunction(
-            name=name,
-            func=func,
-            priority=priority,
-            dependencies=dependencies or []
+            name=name, func=func, priority=priority, dependencies=dependencies or []
         )
         self._functions[name] = lifecycle_func
 
@@ -70,43 +72,42 @@ class LifecycleRegistry:
 _lifecycle_registry = LifecycleRegistry()
 
 
-def lifecycle_function(name: str | None = None, priority: int = 0,
-                      dependencies: list[str] = None):
+def lifecycle_function(
+    name: str | None = None, priority: int = 0, dependencies: list[str] = None
+):
     """
     Decorator for creating modular lifecycle functions.
-    
+
     Lifecycle functions should be async context managers that yield control
     to the main execution and handle cleanup on exit.
-    
+
     Args:
         name: Function name (defaults to function __name__)
         priority: Execution priority (higher = earlier, default 0)
         dependencies: List of function names this depends on
-        
+
     Usage:
         @lifecycle_function(priority=10)
         async def setup_database(rails):
             # Setup phase
             connection = await create_db_connection()
             rails.store.set_sync('db_connection', connection)
-            
+
             yield  # Main execution happens here
-            
+
             # Cleanup phase
             await connection.close()
-            
+
         # Use with Rails
         rails.with_lifecycle(setup_database).when(condition).inject(message)
     """
+
     def decorator(func: Callable) -> Callable:
         func_name = name or func.__name__
 
         # Register the function
         _lifecycle_registry.register(
-            name=func_name,
-            func=func,
-            priority=priority,
-            dependencies=dependencies
+            name=func_name, func=func, priority=priority, dependencies=dependencies
         )
 
         # Mark function as lifecycle function
@@ -121,10 +122,12 @@ def lifecycle_function(name: str | None = None, priority: int = 0,
 
 
 @asynccontextmanager
-async def with_lifecycle_functions(rails_instance, lifecycle_funcs: list[str | Callable]):
+async def with_lifecycle_functions(
+    rails_instance, lifecycle_funcs: list[str | Callable]
+):
     """
     Context manager for composing multiple lifecycle functions.
-    
+
     Args:
         rails_instance: Rails instance to pass to lifecycle functions
         lifecycle_funcs: List of function names or callable functions
@@ -161,7 +164,7 @@ async def with_lifecycle_functions(rails_instance, lifecycle_funcs: list[str | C
         # Cleanup in reverse order
         for ctx in reversed(contexts):
             try:
-                if hasattr(ctx, '__aexit__'):
+                if hasattr(ctx, "__aexit__"):
                     await ctx.__aexit__(None, None, None)
             except Exception as e:
                 # Log error but continue cleanup
@@ -176,11 +179,12 @@ class LifecycleManager:
         self._active_functions: list[str] = []
         self._execution_context: dict[str, Any] = {}
 
-    async def execute_with_lifecycle(self, lifecycle_funcs: list[str | Callable],
-                                   workflow: Callable, *args, **kwargs):
+    async def execute_with_lifecycle(
+        self, lifecycle_funcs: list[str | Callable], workflow: Callable, *args, **kwargs
+    ):
         """
         Execute a workflow with specified lifecycle functions.
-        
+
         Args:
             lifecycle_funcs: List of lifecycle functions to activate
             workflow: Workflow function to execute
@@ -219,19 +223,20 @@ class LifecycleManager:
 
 # Utility functions for common lifecycle patterns
 
+
 @lifecycle_function(name="counter_tracker", priority=5)
 async def counter_tracker_lifecycle(rails):
     """Basic counter tracking lifecycle function."""
     # Setup: Initialize tracking
     start_time = asyncio.get_event_loop().time()
-    rails.store.set_sync('lifecycle_start_time', start_time)
+    rails.store.set_sync("lifecycle_start_time", start_time)
 
     yield  # Main execution
 
     # Cleanup: Log final counts
     end_time = asyncio.get_event_loop().time()
     duration = end_time - start_time
-    rails.store.set_sync('lifecycle_duration', duration)
+    rails.store.set_sync("lifecycle_duration", duration)
 
 
 @lifecycle_function(name="error_handler", priority=10)
@@ -241,23 +246,25 @@ async def error_handler_lifecycle(rails):
         yield  # Main execution
     except Exception as e:
         # Handle errors and potentially inject recovery messages
-        await rails.store.increment('lifecycle_errors')
-        rails.store.set_sync('last_error', str(e))
+        await rails.store.increment("lifecycle_errors")
+        rails.store.set_sync("last_error", str(e))
 
         # Could inject recovery message here
         # This is where tools could manipulate the rails instance
         recovery_message = {
             "role": "system",
-            "content": f"Error occurred during execution: {e}. Attempting recovery..."
+            "content": f"Error occurred during execution: {e}. Attempting recovery...",
         }
 
         # Tools can access rails instance to add conditional recovery
-        error_count = await rails.store.get_counter('lifecycle_errors', 0)
+        error_count = await rails.store.get_counter("lifecycle_errors", 0)
         if error_count >= 3:
             # Inject stop signal after too many errors
-            rails.when(lambda s: s.get_counter_sync('lifecycle_errors') >= 3).inject({
-                "role": "system",
-                "content": "🛑 Multiple errors detected. Stopping execution for safety."
-            })
+            rails.when(lambda s: s.get_counter_sync("lifecycle_errors") >= 3).inject(
+                {
+                    "role": "system",
+                    "content": "🛑 Multiple errors detected. Stopping execution for safety.",
+                }
+            )
 
         raise  # Re-raise the exception

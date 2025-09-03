@@ -12,23 +12,23 @@ from .store import Store
 from .types import Condition, Message, RailState
 
 # Context variable for Rails instance access from tools
-rails_context: ContextVar[Optional['Rails']] = ContextVar('rails_context', default=None)
+rails_context: ContextVar[Optional["Rails"]] = ContextVar("rails_context", default=None)
 
 
-def current_rails() -> 'Rails':
+def current_rails() -> "Rails":
     """Get the current Rails instance from context.
-    
+
     This allows tools to access the Rails store for lifecycle orchestration.
-    
+
     Returns:
         Current Rails instance
-        
+
     Raises:
         RuntimeError: If no Rails instance is active
-        
+
     Usage:
         from rails import current_rails
-        
+
         @tool
         def my_tool():
             rails = current_rails()
@@ -36,7 +36,9 @@ def current_rails() -> 'Rails':
     """
     rails = rails_context.get()
     if rails is None:
-        raise RuntimeError("No Rails instance is currently active. Ensure Rails is initialized.")
+        raise RuntimeError(
+            "No Rails instance is currently active. Ensure Rails is initialized."
+        )
     return rails
 
 
@@ -67,10 +69,10 @@ class Rule(BaseModel):
 
 class Rails(BaseModel):
     """Lifecycle orchestration layer for AI agents.
-    
+
     Rails provides a shared state store that both Rails conditions and agent tools
     can access, enabling sophisticated feedback loops and lifecycle management.
-    
+
     Usage:
         async with Rails() as rails:
             # Add lifecycle rules
@@ -78,7 +80,7 @@ class Rails(BaseModel):
                 condition=QueueLength("tasks") > 5,
                 action=inject_message(system("Focus on high priority tasks"))
             )
-            
+
             # Process messages through Rails
             messages = await rails.process(messages)
     """
@@ -90,32 +92,32 @@ class Rails(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def add_rule(self, condition: Condition, action: Callable,
-                 name: str | None = None, priority: int = 0) -> None:
+    def add_rule(
+        self,
+        condition: Condition,
+        action: Callable,
+        name: str | None = None,
+        priority: int = 0,
+    ) -> None:
         """Add a lifecycle orchestration rule.
-        
+
         Args:
             condition: Condition to evaluate
             action: Action to take when condition is met
             name: Optional rule name for debugging
             priority: Rule priority (higher = evaluated first)
         """
-        rule = Rule(
-            condition=condition,
-            action=action,
-            name=name,
-            priority=priority
-        )
+        rule = Rule(condition=condition, action=action, name=name, priority=priority)
         self.rules.append(rule)
         # Sort by priority
         self.rules.sort(key=lambda r: r.priority, reverse=True)
 
     async def process(self, messages: list[Message]) -> list[Message]:
         """Process messages through Rails lifecycle orchestration.
-        
+
         Args:
             messages: Current message chain
-            
+
         Returns:
             Modified message chain with any injections
         """
@@ -154,8 +156,7 @@ class Rails(BaseModel):
             if token is not None:
                 rails_context.reset(token)
 
-
-    async def __aenter__(self) -> 'Rails':
+    async def __aenter__(self) -> "Rails":
         """Context manager entry - set up Rails context."""
         # Set this instance in context for tool access
         token = rails_context.set(self)
@@ -174,7 +175,7 @@ class Rails(BaseModel):
             await self.store.persist()
 
             # Reset context
-            if hasattr(self, '_context_token'):
+            if hasattr(self, "_context_token"):
                 rails_context.reset(self._context_token)
 
             logger.info("Rails lifecycle orchestration completed")
@@ -183,7 +184,7 @@ class Rails(BaseModel):
 
     def add_middleware(self, middleware: Callable) -> None:
         """Add middleware to the processing stack.
-        
+
         Args:
             middleware: Async callable that processes messages
         """
@@ -191,10 +192,10 @@ class Rails(BaseModel):
 
     async def process_with_middleware(self, messages: list[Message]) -> list[Message]:
         """Process messages through middleware stack then Rails rules.
-        
+
         Args:
             messages: Input messages
-            
+
         Returns:
             Processed messages
         """
@@ -240,7 +241,7 @@ class Rails(BaseModel):
             "total_rules": len(self.rules),
             "active_rules": len(self.get_active_rules()),
             "store_snapshot": snapshot,
-            "middleware_count": len(self.middleware_stack)
+            "middleware_count": len(self.middleware_stack),
         }
 
     def __str__(self) -> str:

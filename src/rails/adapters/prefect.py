@@ -13,17 +13,17 @@ from .base import BaseAdapter
 
 class PrefectAdapter(BaseAdapter):
     """Rails adapter for Prefect workflows.
-    
+
     This adapter enables Rails lifecycle orchestration within Prefect flows and tasks,
     allowing sophisticated state management and conditional message injection for
     AI agents running in Prefect workflows.
-    
+
     Usage:
         from prefect import flow, task
         from rails import Rails
         from rails.adapters.prefect import PrefectAdapter
         from rails.conditions import counter, queue
-        
+
         # Create Rails with lifecycle rules
         rails = Rails()
         rails.add_rule(
@@ -34,29 +34,29 @@ class PrefectAdapter(BaseAdapter):
             condition=queue("errors").length > 0,
             action=system("Errors detected. Consider error recovery.")
         )
-        
+
         # Create adapter
         adapter = PrefectAdapter(rails=rails)
-        
+
         @task
         @adapter.task_decorator
         async def ai_task(messages: list[Message]) -> list[Message]:
             # Task automatically has access to Rails store
             rails = current_rails()
             await rails.store.increment("tasks_completed")
-            
+
             # Process messages (Rails rules automatically applied)
             return messages
-        
+
         @flow
         @adapter.flow_decorator
         async def ai_workflow():
             # Flow has Rails lifecycle management
             messages = [Message(role=Role.USER, content="Start workflow")]
-            
+
             # Tasks will have Rails context
             result = await ai_task(messages)
-            
+
             return result
     """
 
@@ -72,16 +72,15 @@ class PrefectAdapter(BaseAdapter):
             if isinstance(msg, Message):
                 rails_messages.append(msg)
             elif isinstance(msg, dict):
-                rails_messages.append(Message(
-                    role=Role(msg.get("role", "user")),
-                    content=msg.get("content", "")
-                ))
+                rails_messages.append(
+                    Message(
+                        role=Role(msg.get("role", "user")),
+                        content=msg.get("content", ""),
+                    )
+                )
             else:
                 # Assume it's a string or other content
-                rails_messages.append(Message(
-                    role=Role.USER,
-                    content=str(msg)
-                ))
+                rails_messages.append(Message(role=Role.USER, content=str(msg)))
 
         return rails_messages
 
@@ -92,14 +91,15 @@ class PrefectAdapter(BaseAdapter):
 
     def task_decorator(self, func: Callable) -> Callable:
         """Decorator to add Rails lifecycle to Prefect tasks.
-        
+
         Args:
             func: Prefect task function
-            
+
         Returns:
             Wrapped function with Rails integration
         """
         if inspect.iscoroutinefunction(func):
+
             async def wrapper(*args, **kwargs):
                 # Set Rails context for this task
                 token = rails_context.set(self.rails)
@@ -123,7 +123,11 @@ class PrefectAdapter(BaseAdapter):
                         await self.rails.store.increment("prefect_tasks_completed")
 
                     # Process result if it's messages
-                    if isinstance(result, list) and result and isinstance(result[0], (dict, Message)):
+                    if (
+                        isinstance(result, list)
+                        and result
+                        and isinstance(result[0], (dict, Message))
+                    ):
                         result = await self.process_messages(result)
 
                     return result
@@ -131,16 +135,17 @@ class PrefectAdapter(BaseAdapter):
                 except Exception as e:
                     # Track errors
                     await self.rails.store.increment("prefect_task_errors")
-                    await self.rails.store.push_queue("error_queue", {
-                        "task": func.__name__,
-                        "error": str(e)
-                    })
+                    await self.rails.store.push_queue(
+                        "error_queue", {"task": func.__name__, "error": str(e)}
+                    )
                     raise
 
                 finally:
                     # Reset context
                     rails_context.reset(token)
+
         else:
+
             def wrapper(*args, **kwargs):
                 # Sync version - limited Rails support
                 token = rails_context.set(self.rails)
@@ -160,14 +165,15 @@ class PrefectAdapter(BaseAdapter):
 
     def flow_decorator(self, func: Callable) -> Callable:
         """Decorator to add Rails lifecycle to Prefect flows.
-        
+
         Args:
             func: Prefect flow function
-            
+
         Returns:
             Wrapped function with Rails integration
         """
         if inspect.iscoroutinefunction(func):
+
             async def wrapper(*args, **kwargs):
                 # Initialize Rails lifecycle for flow
                 async with self.rails:
@@ -187,7 +193,9 @@ class PrefectAdapter(BaseAdapter):
                         # Log artifacts if enabled
                         if self.enable_artifact_logging:
                             metrics = await self.rails.emit_metrics()
-                            logger.info(f"Rails metrics for flow {func.__name__}: {metrics}")
+                            logger.info(
+                                f"Rails metrics for flow {func.__name__}: {metrics}"
+                            )
 
                         return result
 
@@ -195,7 +203,9 @@ class PrefectAdapter(BaseAdapter):
                         # Track flow errors
                         await self.rails.store.increment("prefect_flow_errors")
                         raise
+
         else:
+
             def wrapper(*args, **kwargs):
                 # Sync version
                 import asyncio
@@ -213,24 +223,25 @@ class PrefectAdapter(BaseAdapter):
 
     def create_rails_task(self, name: str = "rails_process") -> Callable:
         """Create a Prefect task that processes messages through Rails.
-        
+
         Args:
             name: Task name
-            
+
         Returns:
             Prefect task function
-            
+
         Example:
             from prefect import flow
-            
+
             rails_task = adapter.create_rails_task("inject_context")
-            
+
             @flow
             async def my_flow():
                 messages = [...]
                 processed = await rails_task(messages)
                 return processed
         """
+
         async def rails_task(messages: list[Message]) -> list[Message]:
             """Process messages through Rails lifecycle orchestration."""
             return await self.process_messages(messages)
@@ -240,17 +251,18 @@ class PrefectAdapter(BaseAdapter):
 
     def create_state_hook(self) -> Callable:
         """Create a Prefect state hook that updates Rails store.
-        
+
         Returns:
             State hook function
-            
+
         Example:
             from prefect import task
-            
+
             @task(on_completion=[adapter.create_state_hook()])
             async def my_task():
                 ...
         """
+
         async def state_hook(task, task_run, state):
             """Update Rails store based on Prefect state changes."""
             rails = rails_context.get()
@@ -268,24 +280,24 @@ class PrefectAdapter(BaseAdapter):
 
 def rails_task(rails: Rails, name: str = "rails_lifecycle") -> Callable:
     """Create a standalone Prefect task with Rails lifecycle.
-    
+
     Args:
         rails: Rails instance
         name: Task name
-        
+
     Returns:
         Prefect task function
-        
+
     Example:
         from prefect import flow, task
         from rails import Rails
         from rails.adapters.prefect import rails_task
-        
+
         rails = Rails()
         # Configure rails...
-        
+
         process_messages = rails_task(rails, "process_messages")
-        
+
         @flow
         async def my_flow():
             messages = [...]
@@ -313,21 +325,21 @@ def rails_task(rails: Rails, name: str = "rails_lifecycle") -> Callable:
 
 def rails_flow(rails: Rails, name: str = "rails_flow") -> Callable:
     """Create a Prefect flow with Rails lifecycle management.
-    
+
     Args:
         rails: Rails instance
         name: Flow name
-        
+
     Returns:
         Flow decorator
-        
+
     Example:
         from rails import Rails
         from rails.adapters.prefect import rails_flow
-        
+
         rails = Rails()
         # Configure rails...
-        
+
         @rails_flow(rails, "ai_workflow")
         async def my_workflow():
             # Flow has Rails lifecycle

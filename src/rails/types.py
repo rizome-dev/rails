@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class Role(str, Enum):
     """Message role types."""
+
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
@@ -27,7 +28,7 @@ class Message(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    @field_validator('content')
+    @field_validator("content")
     @classmethod
     def content_not_empty(cls, v: str) -> str:
         if not v or not v.strip():
@@ -48,6 +49,7 @@ class StateEvent(BaseModel):
 
 class RailState(str, Enum):
     """Rails lifecycle states."""
+
     INITIALIZED = "initialized"
     EVALUATING = "evaluating"
     INJECTING = "injecting"
@@ -61,12 +63,12 @@ class Condition(Protocol):
     """Protocol for condition evaluation."""
 
     @abstractmethod
-    async def evaluate(self, store: 'Store') -> bool:
+    async def evaluate(self, store: "Store") -> bool:
         """Evaluate condition against store state.
-        
+
         Args:
             store: Current Rails store instance
-            
+
         Returns:
             True if condition is met, False otherwise
         """
@@ -83,13 +85,15 @@ class Injector(Protocol):
     """Protocol for message injection strategies."""
 
     @abstractmethod
-    async def inject(self, messages: list[Message], new_message: Message) -> list[Message]:
+    async def inject(
+        self, messages: list[Message], new_message: Message
+    ) -> list[Message]:
         """Inject a message into the conversation.
-        
+
         Args:
             messages: Current message chain
             new_message: Message to inject
-            
+
         Returns:
             Modified message chain
         """
@@ -106,9 +110,9 @@ class FrameworkAdapter(Protocol):
     """Protocol for integrating Rails with agent frameworks."""
 
     @abstractmethod
-    async def register_store_access(self, store: 'Store') -> None:
+    async def register_store_access(self, store: "Store") -> None:
         """Make Rails store accessible to agent tools.
-        
+
         Args:
             store: Rails store instance to register
         """
@@ -117,10 +121,10 @@ class FrameworkAdapter(Protocol):
     @abstractmethod
     async def wrap(self, agent: Any) -> Any:
         """Wrap an agent with Rails lifecycle management.
-        
+
         Args:
             agent: Agent instance to wrap
-            
+
         Returns:
             Wrapped agent with Rails integration
         """
@@ -129,10 +133,10 @@ class FrameworkAdapter(Protocol):
     @abstractmethod
     async def process_messages(self, messages: list[Message]) -> list[Message]:
         """Process messages through the framework.
-        
+
         Args:
             messages: Messages to process
-            
+
         Returns:
             Processed messages
         """
