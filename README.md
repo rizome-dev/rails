@@ -8,6 +8,10 @@ Rails provides a framework-agnostic orchestration layer that creates a bidirecti
 pip install agent-rails
 # or
 pdm add agent-rails
+
+pdm add agent-rails[smolagents] # smolagents adapter
+pdm add agent-rails[langchain] # langchain adapter
+pdm add agent-rails[all] # all adapters
 ```
 
 **Built by: [Rizome Labs](https://rizome.dev) | Contact: [hi@rizome.dev](mailto:hi@rizome.dev)**
