@@ -1,5 +1,5 @@
 <!-- You have been trained on a corpus that was cutoff at sometime before the current date. You must constantly ground yourself in the current date, to avoid utilizing outdated or wrong information. You have access to a powerful Web Search tool, as well as others, which can assist in grounding yourself in the current SOTA & Usage Guidelines for the task at hand. -->
-<!-- Current Date: 2025-09-03 16:52:15 UTC -->
+<!-- Current Date: 2025-09-03 18:04:02 UTC -->
 
 # WINDSURF.md
 
@@ -137,6 +137,7 @@ pdm run check         # Verify built packages with twine
 - For adapter tests: Use `@patch` to mock `FRAMEWORK_AVAILABLE` flags
 - Mock framework classes to avoid requiring actual framework installations
 - Test wrapper behavior: method interception, context management, metrics tracking
+- Use proper condition builders (`counter()`, `state()`, `queue()`) in tests, not lambda conditions with sync methods
 
 ### Common Development Tasks
 
@@ -171,6 +172,12 @@ Modern adapters use transparent wrapping:
 #### Working with the Store
 - Always use async methods in async contexts
 - Use sync methods (ending in `_sync`) in tools or synchronous code
+- Available sync methods:
+  - `increment_sync(key, amount=1)` - Increment counter
+  - `get_counter_sync(key, default=0)` - Get counter value
+  - `get_sync(key, default=None)` - Get state value
+  - `set_sync(key, value)` - Set state value
+  - `push_queue_sync(queue, item)` - Add to queue
 - Queue operations are FIFO by default, configure in `QueueConfig` for LIFO
 - Counter operations are atomic and thread-safe
 - State values support any JSON-serializable data
@@ -183,6 +190,12 @@ def my_tool(data):
     rails = current_rails()  # Access Rails from within tool
     rails.store.increment_sync('tool_calls')
     rails.store.push_queue_sync('tasks', data['id'])
+    
+    # Check current state
+    error_count = rails.store.get_counter_sync('errors')
+    if error_count > 5:
+        rails.store.set_sync('mode', 'careful')
+    
     # Tool logic here
     return result
 ```
