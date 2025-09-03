@@ -1,4 +1,5 @@
-<!-- Current Date: 2025-08-29 14:36:30 UTC -->
+<!-- You have been trained on a corpus that was cutoff at sometime before the current date. You must constantly ground yourself in the current date, to avoid utilizing outdated or wrong information. You have access to a powerful Web Search tool, as well as others, which can assist in grounding yourself in the current SOTA & Usage Guidelines for the task at hand. -->
+<!-- Current Date: 2025-09-03 04:30:25 UTC -->
 
 # RIZOME.md
 
@@ -104,10 +105,11 @@ pdm run check         # Verify built packages with twine
 - Global executor management with proper cleanup
 
 **Adapters (`src/rails/adapters/`)**
-- `BaseRailsAdapter`: Abstract base for framework integration
+- `BaseAdapter`: Abstract base for framework integration  
 - `LangChainAdapter`: Integration with LangChain
-- `SmolAgentsAdapter`: Integration with SmolAgents
+- `SmolAgentsAdapter`: Integration with SmolAgents (HuggingFace)
 - Generic `create_adapter()` for any processing function
+- `MiddlewareAdapter` and `GenericAdapter` for custom integrations
 
 #### Key Design Patterns
 
@@ -141,10 +143,11 @@ pdm run check         # Verify built packages with twine
 4. Add integration test showing usage
 
 #### Creating a Framework Adapter
-1. Extend `BaseRailsAdapter` in `adapters/`
-2. Implement `process_messages()` for framework-specific logic
+1. Extend `BaseAdapter` in `adapters/base.py`
+2. Implement `process_messages()` for framework-specific logic  
 3. Override `update_rails_state()` if needed
-4. Add example in `examples/adapters.py`
+4. Add example in `examples/modern_adapters.py` or create new example file
+5. For official adapters (LangChain, SmolAgents), add to `src/rails/adapters/`
 
 #### Adding a Lifecycle Function
 1. Use `@lifecycle_function` decorator
@@ -152,20 +155,103 @@ pdm run check         # Verify built packages with twine
 3. Register in `LifecycleRegistry` if built-in
 4. Document priority and dependencies
 
+#### Working with the Store
+- Always use async methods in async contexts
+- Use sync methods (ending in `_sync`) in tools or synchronous code
+- Queue operations are FIFO by default, configure in `QueueConfig` for LIFO
+- Counter operations are atomic and thread-safe
+- State values support any JSON-serializable data
+
+#### Creating Tools with Rails Integration
+```python
+from rails import current_rails
+
+def my_tool(data):
+    rails = current_rails()  # Access Rails from within tool
+    rails.store.increment_sync('tool_calls')
+    rails.store.push_queue_sync('tasks', data['id'])
+    # Tool logic here
+    return result
+```
+
 ### Important Conventions
 
 - **Async-first design**: Prefer async methods, provide sync wrappers where needed
-- **Type hints**: All public APIs must have complete type annotations
+- **Type hints**: All public APIs must have complete type annotations  
 - **Error handling**: Use specific exceptions, never silent failures
 - **Thread safety**: Store operations must be thread-safe
 - **Documentation**: All public functions need docstrings with examples
 - **Testing**: New features require tests before merging
 - **Backwards compatibility**: Follow semantic versioning
+- **Message format**: Use `Message(role=Role.X, content="...")` for type safety
+- **Condition evaluation**: Conditions must implement async `evaluate(store)` method
+- **Context management**: Always use `async with Rails()` for proper lifecycle
 
 ## Provider Overrides
 
 ### CLAUDE
-Claude-specific instructions
+
+#### Quick Reference Patterns
+
+**Basic Rails Setup**
+```python
+from rails import Rails, counter, state, queue, current_rails
+
+async with Rails() as rails:
+    # Add rules
+    rails.add_rule(
+        condition=counter("errors") >= 3,
+        action=lambda msgs: msgs + [{"role": "system", "content": "Error threshold reached"}]
+    )
+    # Process messages
+    processed = await rails.process(messages)
+```
+
+**Tool Integration Pattern**
+```python
+def my_tool(data):
+    rails = current_rails()
+    rails.store.increment_sync("tool_calls")
+    if data.get("error"):
+        rails.store.increment_sync("errors")
+        rails.store.push_queue_sync("error_log", str(data["error"]))
+    return {"processed": True}
+```
+
+**Common Condition Patterns**
+```python
+# Counter conditions
+counter("api_calls") >= 10
+counter("errors") > 0
+
+# State conditions  
+state("mode") == "production"
+state("user_tier").exists
+
+# Queue conditions
+queue("tasks").length > 5
+queue("errors").is_empty
+
+# Composite conditions
+from rails import AndCondition, OrCondition
+AndCondition(counter("attempts") >= 3, state("retry") == True)
+```
+
+**Testing Patterns**
+```python
+# Always test with context manager
+async def test_my_feature():
+    async with Rails() as rails:
+        # Your test code
+        assert rails.state == RailState.ACTIVE
+```
+
+**Important Notes**
+- Use `pdm` for all package management (not pip directly)
+- Run `pdm run test` to verify changes don't break existing functionality
+- Use `pdm run format` before committing code changes
+- Examples in `examples/` show real usage patterns - check them for guidance
+- The `modern_` prefixed examples show current best practices
 
 ### QWEN
 Qwen-specific instructions

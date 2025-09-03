@@ -15,69 +15,55 @@ pdm add agent-rails
 ## Quick Start
 
 ```python
+import os
 import asyncio
-from rails import Rails, current_rails, counter, state, queue
+from smolagents import CodeAgent, DuckDuckGoSearchTool, LiteLLMModel
+from rails import Rails, current_rails, Message, Role, state, system
+from rails.adapters import SmolAgentsAdapter
 
-# Define a tool that accesses Rails
-def fetch_data(data):
-    rails = current_rails()  # Access Rails from within tools
-    rails.store.increment_sync('api_calls')
-    
-    # Tool can push tasks to queues
-    if data.get('needs_processing'):
-        rails.store.push_queue_sync('tasks', data['item'])
-    
-    return {"processed": True, "calls": rails.store.get_counter_sync('api_calls')}
+model = LiteLLMModel(
+    model_id="openrouter/google/gemini-2.5-flash-lite",
+    api_base="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY")
+)
+
+agent = CodeAgent(tools=[DuckDuckGoSearchTool()], model=model, stream_outputs=True)
 
 async def main():
+    # Create Rails instance
     rails = Rails()
     
-    # Fluent condition builders with message injection
-    rails.add_rule(
-        condition=counter("errors") >= 2,
-        action=lambda msgs: msgs + [{
-            "role": "system", 
-            "content": "Multiple errors detected. Switching to recovery mode."
-        }]
-    )
+    # Setup DEBUG_MODE using new Rails rules
+    await rails.store.set('DEBUG_MODE', True)
     
-    # Queue-based orchestration
+    # Add debug injection rule using new syntax
     rails.add_rule(
-        condition=queue("tasks").length > 5,
-        action=lambda msgs: msgs + [{
-            "role": "system",
-            "content": "Task queue is growing. Focus on completion before taking new tasks."
-        }]
+        condition=state('DEBUG_MODE') == True,
+        action=system("Running in DEBUG mode. Please log all important details."),
+        name="debug_mode_injection"
     )
-    
-    # State-based guidance
-    rails.add_rule(
-        condition=state("mode") == "exploration",
-        action=lambda msgs: msgs + [{
-            "role": "system",
-            "content": "In exploration mode - be thorough but watch for diminishing returns."
-        }]
-    )
-    
-    async with rails:  # Context manager handles lifecycle
-        messages = [{"role": "user", "content": "Help me process data"}]
-        
-        # Simulate tool calls and state changes
-        for i in range(6):
-            result = fetch_data({"item": i, "needs_processing": i > 2})
-            if i > 3: 
-                await rails.store.increment('errors')
-            
-            # Process messages through Rails conditions
-            from rails import Message, Role
-            rail_messages = [Message(role=Role(m["role"].upper()), content=m["content"]) for m in messages]
-            processed = await rails.process(rail_messages)
-            
-            # Display any injected guidance
-            for msg in processed[len(rail_messages):]:
-                print(f"💬 Rails: {msg.content}")
 
-asyncio.run(main())
+    async with rails:
+        adapter = SmolAgentsAdapter(rails, agent)
+        messages = [Message(role=Role.USER, content="Research the latest AI developments and calculate ROI")]
+        
+        enhanced_messages = await rails.process(messages)
+        injected_count = len(enhanced_messages) - len(messages)
+        
+        print(f"\nRails processed {len(messages)} → {len(enhanced_messages)} messages")
+        
+        for i, msg in enumerate(enhanced_messages):
+            if i < len(messages):
+                print(f"  → {msg.role.value}: {msg.content[:60]}...")
+            else:
+                print(f"  🆕 {msg.role.value}: {msg.content}")
+        
+        try:
+            # Pass Message objects directly - adapter handles conversion
+            result = await adapter.process_messages(enhanced_messages, task="Research the latest AI developments and calculate ROI")
+            print(f"Agent result: {str(result)[:100]}...")
+        except Exception as e:
+            print(f"⚠️ Agent error (expected without valid API): {str(e)[:60]}...")
 ```
 
 ## Architectural Principles
