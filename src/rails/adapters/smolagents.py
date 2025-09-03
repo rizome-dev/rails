@@ -16,7 +16,7 @@ except ImportError:
     SMOLAGENTS_AVAILABLE = False
 
 from ..core import Rails
-from ..types import Message
+from ..types import Message, Role
 from .base import BaseAdapter
 
 
@@ -46,21 +46,71 @@ class SmolAgentsAdapter(BaseAdapter):
         # Use with Rails injection
         result = await adapter.run("Analyze this data and create a visualization")
     """
+    
+    agent: Any | None = None
 
-    def __init__(self, rails: Rails | None = None, agent: Any | None = None):
+    def __init__(self, rails: Rails | None = None, agent: Any | None = None, **kwargs):
         """Initialize the SmolAgents adapter.
         
         Args:
             rails: Rails instance for message injection
             agent: SmolAgents agent instance
         """
-        super().__init__(rails)
-        self.agent = agent
+        super().__init__(rails=rails, agent=agent, **kwargs)
 
         if not SMOLAGENTS_AVAILABLE:
             raise ImportError(
                 "SmolAgents is not installed. Install it with: pip install smolagents"
             )
+
+    async def to_rails_messages(self, framework_messages: list[Any]) -> list[Message]:
+        """Convert SmolAgents format messages to Rails format.
+        
+        Args:
+            framework_messages: Messages in SmolAgents dict format
+            
+        Returns:
+            Messages in Rails format
+        """
+        rails_messages = []
+        for msg in framework_messages:
+            if isinstance(msg, dict):
+                role_str = msg.get("role", "user")
+                content = msg.get("content", "")
+                
+                # Map role strings to Role enum
+                if role_str in ["user", "human"]:
+                    role = Role.USER
+                elif role_str in ["assistant", "ai"]:
+                    role = Role.ASSISTANT
+                elif role_str == "system":
+                    role = Role.SYSTEM
+                else:
+                    role = Role.USER  # Default fallback
+                    
+                rails_messages.append(Message(role=role, content=content))
+            else:
+                # Handle other message formats if needed
+                rails_messages.append(Message(role=Role.USER, content=str(msg)))
+                
+        return rails_messages
+
+    async def from_rails_messages(self, rails_messages: list[Message]) -> list[Any]:
+        """Convert Rails messages to SmolAgents dict format.
+        
+        Args:
+            rails_messages: Messages in Rails format
+            
+        Returns:
+            Messages in SmolAgents dict format
+        """
+        framework_messages = []
+        for msg in rails_messages:
+            framework_messages.append({
+                "role": msg.role.value,
+                "content": msg.content
+            })
+        return framework_messages
 
     async def process_messages(self, messages: list[Message],
                              agent: Any | None = None,
@@ -82,10 +132,13 @@ class SmolAgentsAdapter(BaseAdapter):
         if target_agent is None:
             raise ValueError("No agent provided. Pass one to __init__ or process_messages")
 
+        # Convert Rails messages to dict format for processing
+        dict_messages = await self.from_rails_messages(messages)
+
         # Handle single task execution (most common SmolAgents pattern)
         if task:
             # Inject Rails messages as system context
-            system_messages = [msg for msg in messages if msg.get("role") == "system"]
+            system_messages = [msg for msg in dict_messages if msg.get("role") == "system"]
             if system_messages:
                 # Combine system messages into agent context
                 context = "\n".join([msg["content"] for msg in system_messages])
@@ -103,12 +156,12 @@ class SmolAgentsAdapter(BaseAdapter):
             conversation = self._build_conversation(messages)
 
             # For conversation, we typically run the last user message
-            user_messages = [msg for msg in messages if msg.get("role") == "user"]
+            user_messages = [msg for msg in dict_messages if msg.get("role") == "user"]
             if user_messages:
                 last_user_message = user_messages[-1]["content"]
 
                 # Add system context if present
-                system_messages = [msg for msg in messages if msg.get("role") == "system"]
+                system_messages = [msg for msg in dict_messages if msg.get("role") == "system"]
                 if system_messages:
                     context = "\n".join([msg["content"] for msg in system_messages])
                     enhanced_message = f"Context: {context}\n\nUser: {last_user_message}"
@@ -131,8 +184,9 @@ class SmolAgentsAdapter(BaseAdapter):
         """
         conversation = []
         for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
+            # Access Message attributes directly
+            role = msg.role.value if hasattr(msg.role, 'value') else str(msg.role)
+            content = msg.content
 
             # Map Rails roles to SmolAgents format
             if role in ["user", "human"]:
@@ -154,7 +208,11 @@ class SmolAgentsAdapter(BaseAdapter):
             modified_messages: Messages after Rails injection
             result: SmolAgents processing result
         """
-        await super().update_rails_state(original_messages, modified_messages, result)
+        # Update message counters
+        await self.rails.store.increment("messages_processed", len(original_messages))
+        if len(modified_messages) > len(original_messages):
+            await self.rails.store.increment("messages_injected", 
+                                            len(modified_messages) - len(original_messages))
 
         # Track SmolAgents-specific metrics
         # Check if tools were used (basic heuristic)
@@ -198,7 +256,9 @@ class CodeAgentAdapter(SmolAgentsAdapter):
             modified_messages: Messages after Rails injection
             result: CodeAgent processing result
         """
-        await super().update_rails_state(original_messages, modified_messages, result)
+        # Call parent's update_rails_state for base tracking
+        await SmolAgentsAdapter.update_rails_state(self, original_messages, 
+                                                  modified_messages, result)
 
         # Track code-specific patterns
         result_str = str(result)
