@@ -43,25 +43,21 @@ async def main():
         name="debug_mode_injection"
     )
 
+    # Create adapter and wrap the agent
+    adapter = SmolAgentsAdapter(rails)
+    
     async with rails:
-        adapter = SmolAgentsAdapter(rails, agent)
-        messages = [Message(role=Role.USER, content="Research the latest AI developments and calculate ROI")]
+        wrapped_agent = await adapter.wrap(agent)
         
-        enhanced_messages = await rails.process(messages)
-        injected_count = len(enhanced_messages) - len(messages)
-        
-        print(f"\nRails processed {len(messages)} → {len(enhanced_messages)} messages")
-        
-        for i, msg in enumerate(enhanced_messages):
-            if i < len(messages):
-                print(f"  → {msg.role.value}: {msg.content[:60]}...")
-            else:
-                print(f"  🆕 {msg.role.value}: {msg.content}")
-        
+        # Use the agent exactly as you normally would!
         try:
-            # Pass Message objects directly - adapter handles conversion
-            result = await adapter.process_messages(enhanced_messages, task="Research the latest AI developments and calculate ROI")
+            result = wrapped_agent.run("Research the latest AI developments and calculate ROI")
             print(f"Agent result: {str(result)[:100]}...")
+            
+            # Check Rails metrics
+            turns = await rails.store.get_counter("agent_runs")
+            injections = await rails.store.get_counter("injections", 0)
+            print(f"\n📊 Rails Metrics: {turns} runs, {injections} injections")
         except Exception as e:
             print(f"⚠️ Agent error (expected without valid API): {str(e)[:60]}...")
 ```
@@ -263,28 +259,30 @@ print(f"Store snapshot: {metrics['store_snapshot']}")
 
 ### Framework Adapters
 
-Rails provides adapters for seamless integration with popular frameworks:
+Rails provides transparent adapters that wrap your existing agents and models, automatically injecting Rails lifecycle management without changing how you use them:
 
 ```python
 from rails import Rails
-from rails.adapters import create_adapter, BaseAdapter
+from rails.adapters import create_adapter
 
-# Generic adapter for any processing function
+# Your existing agent function
 def my_agent(messages):
     # Your agent logic here
     return {"role": "assistant", "content": "Response"}
 
 rails = Rails()
-adapter = create_adapter(rails, my_agent)
+adapter = create_adapter(rails)
 
-async with adapter:
-    result = await adapter.process_messages(messages)
+async with rails:
+    wrapped_agent = await adapter.wrap(my_agent)
+    # Use wrapped_agent exactly like the original!
+    result = wrapped_agent(messages)  # Rails processes transparently
 ```
 
 ### LangChain Integration
 
 ```python
-from rails import Rails, counter
+from rails import Rails, counter, system
 from rails.adapters import LangChainAdapter
 from langchain_openai import ChatOpenAI
 
@@ -292,19 +290,21 @@ rails = Rails()
 
 # Add Rails conditions
 rails.add_rule(
-    condition=counter("messages") >= 5,
-    action=lambda msgs: msgs + [{
-        "role": "system",
-        "content": "This conversation is getting long. Consider summarizing."
-    }]
+    condition=counter("turns") >= 5,
+    action=system("This conversation is getting long. Consider summarizing."),
+    name="conversation_limit"
 )
 
-# Create adapter
+# Create adapter and wrap the model
+adapter = LangChainAdapter(rails)
 llm = ChatOpenAI(model="gpt-4")
-adapter = LangChainAdapter(rails, llm)
 
-# Rails processes messages before LangChain
-result = await adapter.run(messages)
+async with rails:
+    wrapped_llm = await adapter.wrap(llm)
+    
+    # Use exactly like the original - Rails magic happens automatically!
+    messages = [{"role": "user", "content": "Hello, let's chat!"}]
+    result = wrapped_llm.invoke(messages)  # Rails processes transparently
 ```
 
 ### Custom Framework Adapter

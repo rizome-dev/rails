@@ -4,7 +4,10 @@ This module provides seamless integration between Rails and SmolAgents,
 allowing Rails conditional message injection to work with SmolAgents agents and tools.
 """
 
-from typing import Any
+import asyncio
+import inspect
+from typing import Any, Optional
+from functools import wraps
 
 try:
     from smolagents import CodeAgent, ToolCallingAgent
@@ -15,16 +18,169 @@ except ImportError:
     ToolCallingAgent = Any
     SMOLAGENTS_AVAILABLE = False
 
-from ..core import Rails
-from ..types import Message, Role
+from ..core import Rails, rails_context
+from ..types import Message, Role, RailState
 from .base import BaseAdapter
+
+
+class WrappedSmolAgent:
+    """Transparent wrapper for SmolAgents agents with Rails integration."""
+    
+    def __init__(self, agent: Any, rails: Rails, adapter: 'SmolAgentsAdapter'):
+        """Initialize the wrapped agent.
+        
+        Args:
+            agent: The SmolAgents agent to wrap
+            rails: Rails instance for lifecycle management
+            adapter: Parent adapter for message conversion
+        """
+        self._wrapped = agent
+        self._rails = rails
+        self._adapter = adapter
+    
+    def __getattr__(self, name: str) -> Any:
+        """Proxy all attribute access to the wrapped agent."""
+        attr = getattr(self._wrapped, name)
+        
+        # Intercept the run method
+        if name == 'run':
+            return self._create_run_interceptor(attr)
+        
+        return attr
+    
+    def __repr__(self) -> str:
+        """Represent as the wrapped object."""
+        return repr(self._wrapped)
+    
+    def __str__(self) -> str:
+        """String representation."""
+        return str(self._wrapped)
+    
+    def _create_run_interceptor(self, original_run: Any) -> Any:
+        """Create an interceptor for the run method."""
+        
+        @wraps(original_run)
+        def run_interceptor(task: str, **kwargs):
+            """Intercept run() calls and inject Rails processing."""
+            return self._process_with_rails(task, original_run, **kwargs)
+        
+        return run_interceptor
+    
+    def _process_with_rails(self, task: str, method: Any, **kwargs) -> Any:
+        """Process task through Rails before calling the original run method."""
+        # Run async code in a thread to avoid event loop conflicts
+        import concurrent.futures
+        
+        async def _process(task_inner, method_inner, kwargs_inner):
+            token = rails_context.set(self._rails)
+            
+            try:
+                # Create messages from task
+                messages = [Message(role=Role.USER, content=task_inner)]
+                
+                # Process through Rails
+                processed = await self._rails.process(messages)
+                
+                # Update counters
+                await self._rails.store.increment("turns")
+                await self._rails.store.increment("agent_runs")
+                
+                if len(processed) > len(messages):
+                    await self._rails.store.increment("injections", 
+                                                     len(processed) - len(messages))
+                
+                # Build enhanced task with injected context
+                enhanced_task = self._build_enhanced_task(task_inner, processed, messages)
+                
+                # Call original method with enhanced task
+                result = method_inner(enhanced_task, **kwargs_inner)
+                
+                # Track metrics
+                if hasattr(result, 'tool_calls') or "```" in str(result):
+                    await self._rails.store.increment("tool_calls")
+                
+                if "```python" in str(result) or "```code" in str(result):
+                    await self._rails.store.increment("code_generations")
+                
+                return result
+                
+            finally:
+                rails_context.reset(token)
+        
+        # Run in thread pool to avoid event loop issues
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(asyncio.run, _process(task, method, kwargs))
+            return future.result()
+    
+    def _build_enhanced_task(self, original_task: str, processed_messages: list[Message], 
+                            original_messages: list[Message]) -> str:
+        """Build an enhanced task string with Rails injections.
+        
+        Args:
+            original_task: The original task string
+            processed_messages: Messages after Rails processing
+            original_messages: Original messages before Rails
+            
+        Returns:
+            Enhanced task string with any injected context
+        """
+        # Check for injected messages
+        if len(processed_messages) > len(original_messages):
+            injected = processed_messages[len(original_messages):]
+            
+            # Build context from injected messages
+            context_parts = []
+            for msg in injected:
+                if msg.role == Role.SYSTEM:
+                    context_parts.append(f"System: {msg.content}")
+                elif msg.role == Role.ASSISTANT:
+                    context_parts.append(f"Assistant: {msg.content}")
+                else:
+                    context_parts.append(msg.content)
+            
+            if context_parts:
+                context = "\n".join(context_parts)
+                return f"{context}\n\nTask: {original_task}"
+        
+        return original_task
+
+
+class WrappedCodeAgent(WrappedSmolAgent):
+    """Specialized wrapper for SmolAgents CodeAgent with enhanced tracking."""
+    
+    def _process_with_rails(self, task: str, method: Any, **kwargs) -> Any:
+        """Enhanced processing with code-specific tracking."""
+        result = super()._process_with_rails(task, method, **kwargs)
+        
+        # Additional code-specific tracking
+        result_str = str(result)
+        
+        # Track metrics in a thread
+        import concurrent.futures
+        
+        async def _track():
+            if "def " in result_str or "class " in result_str:
+                await self._rails.store.increment("python_functions")
+            
+            if "import " in result_str:
+                await self._rails.store.increment("imports_used")
+            
+            if "Error" in result_str or "Exception" in result_str:
+                await self._rails.store.increment("errors_encountered")
+        
+        # Run in thread pool
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(asyncio.run, _track()).result()
+        
+        return result
 
 
 class SmolAgentsAdapter(BaseAdapter):
     """Rails adapter for SmolAgents integration.
     
-    This adapter allows you to wrap SmolAgents agents with Rails conditional
-    message injection capabilities, enabling sophisticated conversation flow control.
+    This adapter wraps SmolAgents agents to automatically inject Rails
+    message processing. Once wrapped, the agent behaves exactly like
+    the original but with automatic Rails integration.
     
     Usage:
         from smolagents import CodeAgent
@@ -32,37 +188,33 @@ class SmolAgentsAdapter(BaseAdapter):
         
         # Set up Rails rules
         rails = Rails()
-        rails.when(lambda s: s.get_counter_sync('tool_calls') >= 3).inject({
-            "role": "system",
-            "content": "You've used several tools. Consider if you have enough information to answer."
-        })
+        rails.when(counter("tool_calls") >= 3).inject(
+            system("You've used several tools. Consider if you have enough information.")
+        )
         
-        # Create SmolAgents agent
+        # Create adapter and wrap agent
+        adapter = SmolAgentsAdapter(rails)
         agent = CodeAgent(tools=[], model="gpt-4")
+        wrapped = adapter.wrap(agent)
         
-        # Wrap with Rails
-        adapter = SmolAgentsAdapter(rails, agent)
-        
-        # Use with Rails injection
-        result = await adapter.run("Analyze this data and create a visualization")
+        # Use exactly like the original - Rails injection happens automatically!
+        result = wrapped.run("Analyze this data and create a visualization")
     """
     
-    agent: Any | None = None
+    framework_name: str = "smolagents"
 
-    def __init__(self, rails: Rails | None = None, agent: Any | None = None, **kwargs):
+    def __init__(self, rails: Rails | None = None):
         """Initialize the SmolAgents adapter.
         
         Args:
             rails: Rails instance for message injection
-            agent: SmolAgents agent instance
         """
-        super().__init__(rails=rails, agent=agent, **kwargs)
-
         if not SMOLAGENTS_AVAILABLE:
             raise ImportError(
                 "SmolAgents is not installed. Install it with: pip install smolagents"
             )
-
+        super().__init__(rails=rails or Rails(), framework_name="smolagents")
+    
     async def to_rails_messages(self, framework_messages: list[Any]) -> list[Message]:
         """Convert SmolAgents format messages to Rails format.
         
@@ -89,6 +241,9 @@ class SmolAgentsAdapter(BaseAdapter):
                     role = Role.USER  # Default fallback
                     
                 rails_messages.append(Message(role=role, content=content))
+            elif isinstance(msg, str):
+                # Plain string is a user message
+                rails_messages.append(Message(role=Role.USER, content=msg))
             else:
                 # Handle other message formats if needed
                 rails_messages.append(Message(role=Role.USER, content=str(msg)))
@@ -111,124 +266,59 @@ class SmolAgentsAdapter(BaseAdapter):
                 "content": msg.content
             })
         return framework_messages
-
-    async def process_messages(self, messages: list[Message],
-                             agent: Any | None = None,
-                             task: str | None = None,
-                             **kwargs) -> Any:
-        """Process messages through SmolAgents agent.
+    
+    async def wrap(self, agent: Any) -> WrappedSmolAgent:
+        """Wrap a SmolAgents agent with Rails integration.
+        
+        The wrapped agent behaves exactly like the original,
+        but automatically processes tasks through Rails.
         
         Args:
-            messages: Rails-processed messages
-            agent: Optional agent to use (overrides instance agent)
-            task: Task string for single-task execution
-            **kwargs: Additional arguments for the agent
+            agent: SmolAgents agent to wrap
             
         Returns:
-            SmolAgents agent result
+            Wrapped agent with automatic Rails integration
+            
+        Example:
+            agent = CodeAgent(tools=[], model="gpt-4")
+            wrapped = await adapter.wrap(agent)
+            # Now use wrapped exactly like agent, but with Rails!
+            result = wrapped.run("Create a data analysis script")
         """
-        target_agent = agent or self.agent
-
-        if target_agent is None:
-            raise ValueError("No agent provided. Pass one to __init__ or process_messages")
-
-        # Convert Rails messages to dict format for processing
-        dict_messages = await self.from_rails_messages(messages)
-
-        # Handle single task execution (most common SmolAgents pattern)
-        if task:
-            # Inject Rails messages as system context
-            system_messages = [msg for msg in dict_messages if msg.get("role") == "system"]
-            if system_messages:
-                # Combine system messages into agent context
-                context = "\n".join([msg["content"] for msg in system_messages])
-                enhanced_task = f"Context: {context}\n\nTask: {task}"
-            else:
-                enhanced_task = task
-
-            # Run the agent
-            result = target_agent.run(enhanced_task, **kwargs)
-            return result
-
-        # Handle conversation-style interaction
-        else:
-            # Convert Rails messages to SmolAgents format
-            conversation = self._build_conversation(messages)
-
-            # For conversation, we typically run the last user message
-            user_messages = [msg for msg in dict_messages if msg.get("role") == "user"]
-            if user_messages:
-                last_user_message = user_messages[-1]["content"]
-
-                # Add system context if present
-                system_messages = [msg for msg in dict_messages if msg.get("role") == "system"]
-                if system_messages:
-                    context = "\n".join([msg["content"] for msg in system_messages])
-                    enhanced_message = f"Context: {context}\n\nUser: {last_user_message}"
-                else:
-                    enhanced_message = last_user_message
-
-                result = target_agent.run(enhanced_message, **kwargs)
-                return result
-            else:
-                raise ValueError("No user message found in conversation")
-
-    def _build_conversation(self, messages: list[Message]) -> list[dict[str, str]]:
-        """Build SmolAgents conversation format from Rails messages.
+        # Ensure Rails is initialized
+        if self.rails.state == RailState.INITIALIZED:
+            await self.rails.__aenter__()
+        
+        # Register store access for tools
+        await self.register_store_access(self.rails.store)
+        
+        # Return specialized wrapper for CodeAgent if applicable
+        if hasattr(agent, '__class__') and 'code' in agent.__class__.__name__.lower():
+            return WrappedCodeAgent(agent, self.rails, self)
+        
+        return WrappedSmolAgent(agent, self.rails, self)
+    
+    def wrap_sync(self, agent: Any) -> WrappedSmolAgent:
+        """Synchronous version of wrap for convenience.
         
         Args:
-            messages: Rails messages
+            agent: SmolAgents agent to wrap
             
         Returns:
-            SmolAgents conversation format
+            Wrapped agent with automatic Rails integration
         """
-        conversation = []
-        for msg in messages:
-            # Access Message attributes directly
-            role = msg.role.value if hasattr(msg.role, 'value') else str(msg.role)
-            content = msg.content
-
-            # Map Rails roles to SmolAgents format
-            if role in ["user", "human"]:
-                conversation.append({"role": "user", "content": content})
-            elif role in ["assistant", "ai"]:
-                conversation.append({"role": "assistant", "content": content})
-            elif role == "system":
-                # System messages are handled separately in SmolAgents
-                conversation.append({"role": "system", "content": content})
-
-        return conversation
-
-    async def update_rails_state(self, original_messages: list[Message],
-                               modified_messages: list[Message], result: Any) -> None:
-        """Update Rails state after SmolAgents processing.
-        
-        Args:
-            original_messages: Original input messages
-            modified_messages: Messages after Rails injection
-            result: SmolAgents processing result
-        """
-        # Update message counters
-        await self.rails.store.increment("messages_processed", len(original_messages))
-        if len(modified_messages) > len(original_messages):
-            await self.rails.store.increment("messages_injected", 
-                                            len(modified_messages) - len(original_messages))
-
-        # Track SmolAgents-specific metrics
-        # Check if tools were used (basic heuristic)
-        if hasattr(result, 'tool_calls') or "```" in str(result):
-            await self.rails.store.increment("tool_calls")
-
-        # Track if code was generated
-        if "```python" in str(result) or "```code" in str(result):
-            await self.rails.store.increment("code_generations")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self.wrap(agent))
+        finally:
+            loop.close()
 
 
 class CodeAgentAdapter(SmolAgentsAdapter):
     """Specialized Rails adapter for SmolAgents CodeAgent.
     
-    This adapter provides additional functionality specific to CodeAgent,
-    including tracking code execution and managing coding context.
+    This adapter provides enhanced tracking for code generation tasks.
     
     Usage:
         from smolagents import CodeAgent
@@ -236,50 +326,42 @@ class CodeAgentAdapter(SmolAgentsAdapter):
         
         # Set up Rails for code-specific rules
         rails = Rails()
-        rails.when(lambda s: s.get_counter_sync('code_generations') >= 2).inject({
-            "role": "system",
-            "content": "You've generated code multiple times. Consider explaining your approach."
-        })
+        rails.when(counter("code_generations") >= 2).inject(
+            system("You've generated multiple code snippets. Explain how they work together.")
+        )
         
+        # Create adapter and wrap agent
+        adapter = CodeAgentAdapter(rails)
         agent = CodeAgent(tools=[], model="gpt-4")
-        adapter = CodeAgentAdapter(rails, agent)
+        wrapped = adapter.wrap_sync(agent)
         
-        result = await adapter.run("Create a function to calculate fibonacci numbers")
+        # Use exactly like the original!
+        result = wrapped.run("Create a fibonacci function")
     """
-
-    async def update_rails_state(self, original_messages: list[Message],
-                               modified_messages: list[Message], result: Any) -> None:
-        """Update Rails state with CodeAgent-specific tracking.
+    
+    async def wrap(self, agent: Any) -> WrappedCodeAgent:
+        """Wrap a CodeAgent with specialized tracking.
         
         Args:
-            original_messages: Original input messages
-            modified_messages: Messages after Rails injection
-            result: CodeAgent processing result
+            agent: CodeAgent to wrap
+            
+        Returns:
+            Wrapped agent with code-specific Rails integration
         """
-        # Call parent's update_rails_state for base tracking
-        await SmolAgentsAdapter.update_rails_state(self, original_messages, 
-                                                  modified_messages, result)
-
-        # Track code-specific patterns
-        result_str = str(result)
-
-        # Track different types of code generation
-        if "def " in result_str or "class " in result_str:
-            await self.rails.store.increment("python_functions")
-
-        if "import " in result_str:
-            await self.rails.store.increment("imports_used")
-
-        if "Error" in result_str or "Exception" in result_str:
-            await self.rails.store.increment("errors_encountered")
+        # Ensure Rails is initialized
+        if self.rails.state == RailState.INITIALIZED:
+            await self.rails.__aenter__()
+        
+        # Register store access for tools
+        await self.register_store_access(self.rails.store)
+        
+        return WrappedCodeAgent(agent, self.rails, self)
 
 
-def create_smolagents_adapter(agent: Any,
-                            rails: Rails | None = None) -> SmolAgentsAdapter:
+def create_smolagents_adapter(rails: Rails | None = None) -> SmolAgentsAdapter:
     """Factory function to create a SmolAgents Rails adapter.
     
     Args:
-        agent: SmolAgents agent to wrap
         rails: Optional Rails instance
         
     Returns:
@@ -287,28 +369,36 @@ def create_smolagents_adapter(agent: Any,
         
     Example:
         from smolagents import CodeAgent
-        from rails import Rails
+        from rails import Rails, counter, system
         from rails.adapters import create_smolagents_adapter
         
         # Set up Rails
         rails = Rails()
-        rails.when(lambda s: s.get_counter_sync('turns') >= 3).inject({
-            "role": "system",
-            "content": "Consider if you need to break down the task into smaller steps."
-        })
+        rails.when(counter("turns") >= 3).inject(
+            system("Consider breaking down the task into smaller steps.")
+        )
         
-        # Create adapter
+        # Create adapter and wrap agent
+        adapter = create_smolagents_adapter(rails)
         agent = CodeAgent(tools=[], model="gpt-4")
-        adapter = create_smolagents_adapter(agent, rails)
+        wrapped = adapter.wrap_sync(agent)
         
-        # Use it
-        result = await adapter.run(task="Analyze sales data and create visualizations")
+        # Use exactly like the original!
+        result = wrapped.run("Analyze sales data and create visualizations")
     """
-    # Return specialized adapter for CodeAgent
-    if hasattr(agent, 'tools') and 'code' in str(type(agent).__name__).lower():
-        return CodeAgentAdapter(rails, agent)
+    return SmolAgentsAdapter(rails)
 
-    return SmolAgentsAdapter(rails, agent)
+
+def create_code_agent_adapter(rails: Rails | None = None) -> CodeAgentAdapter:
+    """Factory function to create a specialized CodeAgent adapter.
+    
+    Args:
+        rails: Optional Rails instance
+        
+    Returns:
+        Configured CodeAgentAdapter with enhanced tracking
+    """
+    return CodeAgentAdapter(rails)
 
 
 # Decorator for wrapping SmolAgents agents with Rails
@@ -322,20 +412,29 @@ def with_rails(rails: Rails | None = None):
         Decorator function
         
     Example:
+        from rails import Rails, counter, system
+        
         rails = Rails()
-        rails.when(condition).inject(message)
+        rails.when(counter("errors") > 0).inject(
+            system("An error was encountered. Please handle it gracefully.")
+        )
         
         @with_rails(rails)
         def create_agent():
             return CodeAgent(tools=[], model="gpt-4")
         
-        # Now the agent includes Rails injection
-        adapter = create_agent()
-        result = await adapter.run("Create a data analysis script")
+        # Now the agent includes Rails injection automatically
+        agent = create_agent()
+        result = agent.run("Create a data analysis script")
     """
     def decorator(func):
         def wrapper(*args, **kwargs):
             agent = func(*args, **kwargs)
-            return create_smolagents_adapter(agent, rails)
+            # Auto-detect agent type
+            if hasattr(agent, '__class__') and 'code' in agent.__class__.__name__.lower():
+                adapter = CodeAgentAdapter(rails)
+            else:
+                adapter = SmolAgentsAdapter(rails)
+            return adapter.wrap_sync(agent)
         return wrapper
     return decorator
