@@ -17,10 +17,10 @@ except ImportError:
 
 from ..core import Rails
 from ..types import Message
-from .base import BaseRailsAdapter
+from .base import BaseAdapter
 
 
-class SmolAgentsAdapter(BaseRailsAdapter):
+class SmolAgentsAdapter(BaseAdapter):
     """Rails adapter for SmolAgents integration.
     
     This adapter allows you to wrap SmolAgents agents with Rails conditional

@@ -25,10 +25,10 @@ except ImportError:
 
 from ..core import Rails
 from ..types import Message
-from .base import BaseRailsAdapter
+from .base import BaseAdapter
 
 
-class LangChainAdapter(BaseRailsAdapter):
+class LangChainAdapter(BaseAdapter):
     """Rails adapter for LangChain integration.
     
     This adapter allows you to wrap any LangChain runnable (chains, agents, chat models)
