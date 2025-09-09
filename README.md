@@ -16,65 +16,7 @@ pdm add agent-rails[all] # all adapters
 
 **Built by: [Rizome Labs](https://rizome.dev) | Contact: [hi@rizome.dev](mailto:hi@rizome.dev)**
 
-## Quick Start
-
-```python
-import os
-import asyncio
-from smolagents import CodeAgent, DuckDuckGoSearchTool, LiteLLMModel
-from rails import Rails, current_rails, Message, Role, state, system
-from rails.adapters import SmolAgentsAdapter
-
-model = LiteLLMModel(
-    model_id="openrouter/google/gemini-2.5-flash-lite",
-    api_base="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY")
-)
-
-agent = CodeAgent(tools=[DuckDuckGoSearchTool()], model=model, stream_outputs=True)
-
-async def main():
-    # Create Rails instance
-    rails = Rails()
-    
-    # Setup DEBUG_MODE using new Rails rules
-    await rails.store.set('DEBUG_MODE', True)
-    
-    # Add debug injection rule using new syntax
-    rails.add_rule(
-        condition=state('DEBUG_MODE') == True,
-        action=system("Running in DEBUG mode. Please log all important details."),
-        name="debug_mode_injection"
-    )
-
-    # Create adapter and wrap the agent
-    adapter = SmolAgentsAdapter(rails)
-    
-    async with rails:
-        wrapped_agent = await adapter.wrap(agent)
-        
-        # Use the agent exactly as you normally would!
-        try:
-            result = wrapped_agent.run("Research the latest AI developments and calculate ROI")
-            print(f"Agent result: {str(result)[:100]}...")
-            
-            # Check Rails metrics
-            turns = await rails.store.get_counter("agent_runs")
-            injections = await rails.store.get_counter("injections", 0)
-            print(f"\n📊 Rails Metrics: {turns} runs, {injections} injections")
-        except Exception as e:
-            print(f"⚠️ Agent error (expected without valid API): {str(e)[:60]}...")
-```
-
-## Architectural Principles
-
-Rails implements a **bidirectional shared state model** that enables sophisticated lifecycle orchestration:
-
-```
-Agent Tools (Write State) ←→ Rails Store (Monitor State) ←→ Rails Conditions (Inject Context)
-```
-
-## Core Components
+## Documentation
 
 ### 1. Fluent Condition Builders
 
